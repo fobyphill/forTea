@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Валюты</title>
+</head>
+    <body>
+        <table>
+            <tr>
+                {% for h in headers %}
+                    <td>{{ h }}</td>
+                {% endfor %}
+            </tr>
+            {% for v in values %}
+                <tr>
+                    {% for k, v in v.items %}
+                        <td>{{ v }}</td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+        </table>
+    </body>
+</html>

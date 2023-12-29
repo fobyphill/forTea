@@ -1,0 +1,18 @@
+<div id="div_tl_hist">
+    <div class="input-group">
+        <span class="input-group-text">Версия</span>
+        <span class="form-control" id="s_hist_range"></span>
+
+    </div>
+    <div class="input-group mb-3">
+        <span class="input-group-text">От</span>
+        <input type="datetime-local" id="i_timeline_from" class="form-control" step="1">
+        <span class="input-group-text">До</span>
+        <input type="datetime-local" id="i_timeline_to" class="form-control" step="1">
+        <button type="button" class="btn btn-outline-secondary"
+                onclick="change_timeline_interval()">Обновить таймлайн</button>
+        <input type="range" class="form-control-range" id="i_hist_range" onchange="moove_time()"
+               value="1" max="1" list="steplist">
+        <datalist id="steplist"></datalist>
+    </div>
+</div>

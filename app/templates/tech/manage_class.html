@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Управление таблицами</title>
+    <script src="{% static 'js/tech/manage_table.js' %}"></script>
+</head>
+<body>
+    <div>
+        {{ message|linebreaks }}
+    </div>
+    <form id="f_create_class">
+        <h2>Создать справочник</h2>
+        <input name="i_class_name">
+        <button type="submit">Создать</button>
+    </form>
+    <form id="form">
+        <h2>Добавить параметр</h2>
+        <select name="s_table">
+            {% for t in tables %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+            {% endfor %}
+        </select>
+        <select name="s_fields" onchange="show_hide_select(this)">
+            {%  for t in types %}
+                <option value="{{ t.value }}">{{ t.value }}</option>
+            {% endfor %}
+        </select>
+        {# невидимый список - для ссылок #}
+        <select name="s_link" id="s_link" style="display: none" >
+            <option value="0">Справочники</option>
+            {% for t in tables %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+            {% endfor %}
+        </select>
+
+        <input type="text" name="i_name">
+        <button type="button" onclick="add_field()">Создать</button>
+    </form>
+
+    <form id="form_delete_field">
+        <h2>Удалить параметр</h2>
+        <select name="s_table_del" onchange="change_table_del(this)">
+            <option>Выберите справочник</option>
+            {% for t in tables %}
+                <option value="{{ t.id }}">{{ t.name }}</option>
+            {% endfor %}
+        </select>
+        <select name="s_field_del" id="s_field_del">
+            <option>Выберите параметр</option>
+        </select>
+        <button onclick="delete_field()">Удалить</button>
+    </form>
+    <table style="display: none">
+        <tr>
+            {% for f in fields %}
+                <td id="{{ f.id }}" name="{{ f.parent_id }}">{{ f.name }}</td>
+            {% endfor %}
+        </tr>
+    </table>
+</body>
+</html>

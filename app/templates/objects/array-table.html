@@ -1,0 +1,18 @@
+{% load my_filters %}
+<table id="table_array_{{ h.id }}" class="table table-hover table-responsive-md table_sort"
+       style="width:100%; margin-bottom: 0">
+    <thead>
+        {% for a in request.session.temp_object_manager.arrays %}
+            {% if a.id == h.id %}
+                <tr style="cursor: pointer; margin: 0" class="row">
+                    <th class="col-1 text-right col_sort table-rows-bottom" style="padding: 0">№</th>
+                    {% for ha in a.vis_headers %}
+                        <th class="col text-center col_sort table-rows-bottom" style="padding: 0;" id="td_header_{{ a.id }}|{{ ha.id }}"
+                        >{{ ha.name }}</th>
+                    {% endfor %}
+                    </tr>
+            {% endif %}
+        {% endfor %}
+    </thead>
+    <tbody id="tbody_array_{{ h.id }}"></tbody>
+</table>

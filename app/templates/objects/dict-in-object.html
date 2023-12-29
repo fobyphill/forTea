@@ -1,0 +1,12 @@
+{% if request.session.temp_object_manager.my_dicts %}
+    <div>
+        <hr style="margin-bottom: 0">
+        <span style="color: lightslategray">словари</span>
+        <div id="div_wrapper_dicts"></div>
+        <div id="div_footer_dict" class="input-group mb-3">
+            <span class="input-group-text">Доступные словари</span>
+            <select class="form-control" id="new_dict"></select>
+            <button class="btn-outline-primary btn" onclick="add_dict()">Добавить</button>
+        </div>
+    </div>
+{% endif %}

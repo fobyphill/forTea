@@ -1,0 +1,111 @@
+{% load my_filters %}
+<table id="data-table" class="table table-hover table-responsive-md table_sort" style="width:100%">
+    <thead>
+        <tr style="cursor: pointer;" class="row">
+            <th class="col-1 text-right col_sort">Код</th>
+            {% for h in headers %}
+                {% if h.is_visible or h.formula == 'array' %}
+                    <th
+                        {% if h.formula == 'array' %}
+                            class="tag-invis"
+                        {% else %}
+                            class="col text-center col_sort"
+                        {% endif %}
+                    >{% if h.name == 'system_data' %}Дата и время записи{% else %}{{ h.name }}{% endif %}
+                    </th>
+                {% endif %}
+            {% endfor %}
+            {% for h in headers %}
+                <th class="tag-invis" id="header_info{{ h.id }}">{{ h|json_dumps }}</th>
+            {% endfor %}
+            {# Пропишем словари в заголовках, если они там есть #}
+            {% for md in request.session.temp_object_manager.my_dicts %}
+                <th class="tag-invis" id ='header_dict{{ md.id }}'>{{ md|json_dumps }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% load l10n %}
+        {% for object in objects %}
+            <tr
+                {% if request.POST.i_code == object.code|stringformat:'d' %}
+                    class="row table-active"
+                {% else %}
+                    class="row"
+                {% endif %} onclick="sao(this, '{{ db_loc }}')" id="{{ object.code|stringformat:'d' }}">
+                <td class="col-1 text-right">{{ object.code|stringformat:'d'  }}</td>
+                {% for h in headers %}
+                    {% if h.is_visible == True or h.formula == 'array' %}
+                        <td id="{{ h.id }}|{{ object.code|stringformat:'d' }}"
+                            {% if h.is_visible == True %}
+                                class="col text-center"
+                            {% else %}
+                                class = 'tag-invis'
+                            {% endif %} style="word-break: break-all"
+                            >
+                        {% if h.name == 'system_data' %}
+                            {% with datetime_create=object|get_item:h.id %}
+                                {{ datetime_create.value.datetime_create|datetime_string_to_russian }}
+                            {% endwith %}
+                        {% elif h.formula == 'link' %}  {# Если тип данных ссылка #}
+                            {% with link_data=object|get_item:h.id %}
+                                {% if link_data.value %}
+                                    <a target="_blank" onclick="event.stopPropagation()"
+                                       href="/{% if h.value.0 == 't' %}manage-object{% else %}contract{% endif %}?class_id={{ link_data.data.parent_structure }}&object_code={{ link_data.data.code }}">
+                                     {% for v in link_data.data.values %}
+                                         {% if v.name == 'Наименование' and h.value.0 == 't' or v.name == 'system_data' and h.value.0 == 'c' %}
+                                             {% if h.value.0 == 'c' %}
+                                                 {{ v.value.datetime_create|datetime_string_to_russian }}
+                                             {% else %}
+                                                {{ v.value }}
+                                             {% endif %}
+                                         {% endif %}
+                                     {% endfor %}
+                                    </a>
+                                {% endif %}
+                            {% endwith %}
+                        {% elif h.formula == 'bool' %} {# Если булевый тип #}
+                            {% with bool_type=object|get_item:h.id %}
+                                <span class="tag-invis">{{ bool_type.value }}</span>
+                                <input type="checkbox" onclick="javascript: return false;"
+                                    {% if bool_type.value %} checked{% endif %}>
+                            {% endwith %}
+                        {% elif h.formula == 'datetime' %} {# Датавремя #}
+                            {% with datetime_object=object|get_item:h.id %}
+                                <span id="idtr_{{ h.id }}|{{ object.code }}">
+                                    {% if datetime_object %}
+                                        {{ datetime_object.value|datetime_string_to_russian }}
+                                    {% endif %}
+                                </span>
+                            {% endwith %}
+                        {% elif h.formula == 'date' %}{# Дата #}
+                            {% with date_object=object|get_item:h.id %}
+                                {{ date_object.value|date_string_to_russin }}
+                            {% endwith %}
+                        {% elif h.formula == 'enum' %}{# Перечисление #}
+                            {% with enum_object=object|get_item:h.id %}
+                                {{ enum_object.value }}
+                            {% endwith %}
+                        {% elif h.formula == 'const' %}{# Если тип данных - константа #}
+                            {% with formula=object|get_item:h.id %}
+                                <span id="{{ h.id}}|{{formula.value }}">{{ formula.result|safe }}</span>
+                            {% endwith %}
+                        {% elif h.formula == 'array' %}  {# Если тип данных - массив #}
+                        {% elif h.formula == 'file' %}
+                            {% with enum_object=object|get_item:h.id %}
+                                {{ enum_object.value|slice:"14:" }}
+                            {% endwith %}
+                        {% else %}
+                            {% with cell=object|get_item:h.id %}
+                                {% if cell.value %}
+                                    {{ cell.value|safe }}
+                                {% endif %}
+                            {% endwith %}
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+        {% endfor %}
+    </tbody>
+    </table>

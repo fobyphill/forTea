@@ -1,0 +1,386 @@
+{% extends 'partials/../base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    li {
+        list-style-type: none;
+        cursor: pointer;
+    }
+    li > a {
+      display: block;
+    }
+    .CodeMirror{
+        height: 100%;
+    }
+    .CodeMirror-scroll{
+        overflow: initial !important;
+    }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/constructors/manage-contracts.js' %}"></script>
+    <script src="{% static 'js/constructors/manage-contracts2.js' %}"></script>
+    <script src="{% static 'js/constructors/constructors-ajax.js' %}"></script>
+    <script src="{% static 'js/ajaxes.js' %}"></script>
+    <script src="{% static 'js/constructors/manage-class2.js' %}"></script>
+    <script src="{% static 'js/constructors/codemirror.js' %}"></script>
+    <script src="{% static 'js/urls.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+    <div id="div_message" class="{{ message_class }}">{{ message|safe }}</div>
+    <div class="card">
+        <form id="form" onsubmit="return false" method="post">
+            {% csrf_token %}
+            <div class="card-body">
+                <div class="row">
+                    <div class="col" >
+                        <h4><a href="manage-contracts">Дерево контрактов</a></h4>
+                        {# блок поиска #}
+                        <div class="my-inline-blocks">
+                            <label>Поиск</label>
+                            <input class="form-control" id="i_search" style="width: 120px; display: inline">
+                            <button type="button" class="btn btn-outline-primary" style="vertical-align: top"
+                                    onclick="full_search_in_tree()">Найти</button>
+                        </div>
+                        {# дерево #}
+                        <div id="div_tree">
+                            <ul id="ul_tree">
+                                {% for ct in request.session.contract_tree %}
+                                    {% with tags=ct|get_children_contract %}
+                                        {{ tags|safe }}
+                                    {% endwith %}
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        <div id="div_search_result" class="tag-invis"></div>
+                    </div>
+                    <div class="col-8">
+                        <h5>Управление контрактами</h5>
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">ID</span>
+                            <input class="form-control bg-light" id="i_id" name="i_id" readonly style="background-color: white"
+                            value="{{ current_class.id }}">
+                        </div>
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">Название</span>
+                            <input class="form-control input-manage" id="i_name" name="i_name" oninput="is_change_unit()">
+                        </div>
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">Тип</span>
+                            <input class="form-control" id="i_type" name="i_type" readonly style="background-color: white">
+                            <select class="tag-invis" id="s_folder_class" name="s_folder_class" onclick="select_class_type()">
+                                {% for k, v in request.session.class_types.items %}
+                                    {% if k != 'table' %}
+                                        <option value="{{ k }}" {% if k == 'contract' %} selected {% endif %}>{{ v }}</option>
+                                    {% endif %}
+                                {% endfor %}
+                            </select>
+                            <select class="tag-invis" id="s_control_field" name="s_control_field"
+                                    onchange="is_change_unit()"></select>
+                        </div>
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">ID каталога</span>
+                            <input class="form-control input-manage" id="i_parent" name="i_parent" type="number"
+                                   oninput="is_change_unit(), select_class_type()" value="{{ request.POST.i_parent }}">
+                        </div>
+                        {% if request.user.is_superuser %}
+                            <button id="b_new" class="my-base-button btn" onclick="new_folder()"
+                            style="width: 125px;" type="button">Новый</button>
+                            <button class="btn my-base-button" onclick="send_form_with_param('b_save')"
+                            style="width: 125px" id="b_save" type="button">
+                                Сохранить
+                            </button>
+                            <button class="btn btn-danger" onclick="$('#delete_class_modal').modal('show');"
+                            style="width: 125px" id="b_delete" type="button">
+                                Удалить
+                            </button>
+                        {% endif %}
+                        {# Системные параметры контракта #}
+                        <div id="div_system_contract_params" class="tag-invis">
+                            <hr>
+                            <h5>Управление системными параметрами контракта</h5>
+                            <table class="table table-hover table-responsive-md table_sort" id="table_system_params">
+                                <thead>
+                                    <tr class="row" style="cursor: pointer; border-left: 1px solid #dee2e6">
+                                        <th class="col-1 text-center">ID</th>
+                                        <th class="col-3 text-center">Название</th>
+                                        <th class="col text-center">Значение</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table_body_system_params">
+                                    <tr class="row">
+                                        <td class="col-1 text-center" id="td_br_id"></td>
+                                        <td class="col-3 text-center">Бизнес-правило</td>
+                                        <td class="col" id="td_br"></td>
+                                    </tr>
+                                    <tr class="row">
+                                        <td class="col-1 text-center" id="td_lm_id"></td>
+                                        <td class="col-3 text-center">Link Map</td>
+                                        <td class="col" id="td_lm"></td>
+                                    </tr>
+                                    <tr class="row">
+                                        <td class="col-1 text-center" id="td_tr_id"></td>
+                                        <td class="col-3 text-center">Триггер</td>
+                                        <td class="col" id="td_tr"></td>
+                                    </tr>
+                                    <tr class="row">
+                                        <td class="col-1 text-center" id="td_cc_id"></td>
+                                        <td class="col-3 text-center">Условие завершения</td>
+                                        <td class="col" id="td_cc"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            {% if request.user.is_superuser %}
+                                <button class="col btn my-base-button" onclick="save_system_fields()"
+                                style="width: 125px" type="button">Сохранить</button>
+                            {% endif %}
+                        </div>
+                        {# Пользовательские параметры контракта #}
+                        <div id="div_class_params" class="tag-invis">
+                            <hr>
+                            <h5>Управление пользовательскими параметрами</h5>
+                            {# Управление параметрами #}
+                            <table class="table table-hover table-responsive-md table_sort" id="table_params">
+                                <thead>
+                                    <tr class="row" style="cursor: pointer; border-left: 1px solid #dee2e6">
+                                        <th class="col-0-5" style="padding: 0.75rem 0"></th>
+                                        <th class="col-0-5 text-right" style="word-wrap: normal; padding: 0.75rem 0">ID</th>
+                                        <th class="col-3 text-center">Название</th>
+                                        <th class="col-1 text-center">Тип</th>
+                                        <th class="col text-center">Код значения</th>
+                                        <th class="col-2 text-center">По умолчанию</th>
+                                        <th class="col-0-5 text-center" style="word-wrap: normal">О</th>
+                                        <th class="col-0-5 text-center" style="word-wrap: normal">Т</th>
+                                        <th class="col-0-5 text-center" style="word-wrap: normal">D</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table_body_params"></tbody>
+                            </table>
+                            {% if request.user.is_superuser %}
+                                <button class="col my-base-button btn" onclick="new_field(true)"
+                                style="width: 125px;" id="b_new_param" type="button">Новый</button>
+                                <button class="col btn my-base-button" onclick="save_fields()"
+                                style="width: 125px" type="button">
+                                    Сохранить
+                                </button>
+                                <button class="col btn btn-danger" onclick="delete_field()" style="width: 125px"
+                                        id="b_delete_field" disabled type="button">
+                                    Удалить
+                                </button>
+                            {% endif %}
+                        </div>
+
+                        {# Параметры константы #}
+                        <div id="div_alias_params" class="tag-invis">
+                            <hr>
+                            <h5>Управление параметрами константы</h5>
+                            <table class="table table-hover table-responsive-md table_sort" id="table_alias">
+                                <thead>
+                                    <tr class="row" style="cursor: pointer; border-left: 1px solid #dee2e6">
+                                        <th class="col-1 text-right">ID</th>
+                                        <th class="col-4 text-center">Название</th>
+                                        <th class="col text-center">Формула</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table_body_alias"></tbody>
+                            </table>
+                            {% if request.user.is_superuser %}
+                                <button class="col my-base-button btn" onclick="new_alias()"
+                                style="width: 125px;" id="b_new_alias">Новый</button>
+                                <button class="col btn my-base-button" onclick="save_alias()"
+                                style="width: 125px" >
+                                    Сохранить
+                                </button>
+                                <button class="col btn btn-danger" onclick="delete_alias()" style="width: 125px"
+                                        id="b_delete_alias" disabled>Удалить</button>
+                            {% endif %}
+                        </div>
+                        {# Параметры словаря #}
+                        <div id="div_dict_params" class="tag-invis">
+                            <hr>
+                            <h5>Управление параметрами словаря</h5>
+                            {# Управление параметрами #}
+                            <table class="table table-hover table-responsive-md table_sort" id="dict_params">
+                                <thead>
+                                    <tr class="row" style="cursor: pointer; border-left: 1px solid #dee2e6">
+                                        <th class="col-0-5" style="padding: 0.75rem 0"></th>
+                                        <th class="col-0-5 text-right" style="word-wrap: normal; padding: 0.75rem 0">ID</th>
+                                        <th class="col-3 text-center">Название</th>
+                                        <th class="col-1 text-center">Тип</th>
+                                        <th class="col text-center">По умолчанию</th>
+                                        <th class="col-1 text-center">Видим</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dict_body_params"></tbody>
+                            </table>
+                            {% if request.user.is_superuser %}
+                                <button class="col my-base-button btn" onclick="new_field_dict()"
+                                style="width: 125px;" id="b_new_param_dict" type="button">Новый</button>
+                                <button class="col btn my-base-button" onclick="save_params_dict()" style="width: 125px"
+                                        type="button" id="b_save_params_dict">
+                                    Сохранить
+                                </button>
+                                <button class="col btn btn-danger" onclick="delete_field(true)" style="width: 125px"
+                                        id="b_delete_field_dict" disabled type="button">
+                                    Удалить
+                                </button>
+                            {% endif %}
+                        </div>
+                        {% include 'constructors/div-tree-params.html' %}{# Параметры дерева #}
+                        {% include 'constructors/div-tp-params.html' %} {#Параметры техпроцесса #}
+                    </div>
+                </div>
+                {# Модальное окно удаления класса#}
+                <div class="modal fade" id="delete_class_modal" tabindex="-1" role="dialog"
+                     aria-labelledby="exampleModalLabel" aria-hidden="true">
+                  <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                      <div class="modal-header">
+                        <h5 class="modal-title" id="exampleModalLabel">Внимание!</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                          <span aria-hidden="true">Удаление контракта/группы</span>
+                        </button>
+                      </div>
+                      <div class="modal-body">
+                          <div class="form-group">
+                              Вы пытаетесь удалить класс. Действие необратимо. Подтвердите намерение.
+                          </div>
+                      </div>
+                      <div class="modal-footer">
+                          <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                          <button type="button" class="btn btn-danger" onclick="send_form_with_param('b_delete')">Удалить</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {# Модальное окно удаления поля класса#}
+                <div class="modal fade" id="delete_field_modal" tabindex="-1" role="dialog"
+                     aria-labelledby="exampleModalLabel" aria-hidden="true">
+                  <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                      <div class="modal-header">
+                        <h5 class="modal-title" id="del_field_label">Внимание!</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">Удаление параметра контракта</span>
+                        </button>
+                      </div>
+                      <div class="modal-body">
+                          <div class="form-group">
+                              Вы удаляете параметр контракта. Действие необратимо. Подтвердите намерение.
+                          </div>
+                      </div>
+                      <div class="modal-footer">
+                          <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                          <button type="button" class="btn btn-danger"
+                                  onclick="send_form_with_param('b_del_field', $('#param_id').val())">Удалить</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {# Модальное окно удаления поля алиаса#}
+                <div class="modal fade" id="delete_alias_modal" tabindex="-1" role="dialog"
+                     aria-labelledby="exampleModalLabel" aria-hidden="true">
+                  <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                      <div class="modal-header">
+                        <h5 class="modal-title" id="del_field_label">Внимание!</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">Удаление параметра константы</span>
+                        </button>
+                      </div>
+                      <div class="modal-body">
+                          <div class="form-group">
+                              Вы удаляете параметр константы. Действие необратимо. Подтвердите намерение.
+                          </div>
+                      </div>
+                      <div class="modal-footer">
+                          <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                          <button type="button" class="btn btn-danger"
+                                  onclick="send_form_with_param('b_del_alias', $('#param_id').val())">Удалить</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {# Модальное окно удаления поля словаря#}
+                <div class="modal fade" id="delete_field_dict_modal" tabindex="-1" role="dialog"
+                     aria-labelledby="exampleModalLabel" aria-hidden="true">
+                  <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                      <div class="modal-header">
+                        <h5 class="modal-title" id="del_field_label">Внимание!</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">Удаление параметра словаря</span>
+                        </button>
+                      </div>
+                      <div class="modal-body">
+                          <div class="form-group">
+                              Вы удаляете параметр словаря. Действие необратимо. Подтвердите намерение.
+                          </div>
+                      </div>
+                      <div class="modal-footer">
+                          <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                          <button type="button" class="btn btn-danger"
+                                  onclick="send_form_with_param('b_del_field_dict', $('#param_id').val())">Удалить</button>
+                      </div>
+                    </div>
+                    </div>
+                  </div>
+                {# Модальное окно удаления техпроцесса#}
+                <div class="modal fade" id="delete_tp_modal" tabindex="-1" role="dialog"
+                     aria-labelledby="exampleModalLabel" aria-hidden="true">
+                  <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                      <div class="modal-header">
+                        <h5 class="modal-title" id="exampleModalLabel">Внимание!</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                          <span aria-hidden="true">Удаление стадии технического процесса</span>
+                        </button>
+                      </div>
+                      <div class="modal-body">
+                          <div class="form-group">
+                              Вы пытаетесь удалить стадию технического процесса. Действие необратимо. Подтвердите намерение.
+                          </div>
+                      </div>
+                      <div class="modal-footer">
+                          <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                          <button type="button" class="btn btn-danger" onclick="delete_stage()">Удалить</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+            </div>
+            <div class="tag-invis">
+                <input id="i_types" value="{{ request.session.data_types|json_dumps }}">
+                <input id="i_classes" value="{{ request.session.class_types|json_dumps }}">
+                <input id="i_aliases" value="{{ request.session.aliases|json_dumps }}">
+                <span id="fields">{{ properties|json_dumps }}</span>
+                <span id="system_fields">{{ system_props|json_dumps }}</span>
+                <input id="param_id">
+                <input id="is_dict"
+                    {% if request.GET.location == 'd' %}
+                        value="true"
+                   {% else %}
+                        value="false"
+                   {% endif %}
+                >
+                <input id="i_loc" value="{{ location }}">
+            </div>
+        </form>
+    </div>
+    <b>Условные обозначения</b><br>
+    <ul>
+        <li><b>О</b> - обязательный параметр</li>
+        <li><b>Т</b> - параметр отображается в таблице</li>
+    </ul>
+
+{% endblock %}

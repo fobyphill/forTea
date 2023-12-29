@@ -1,0 +1,43 @@
+<nav class="my-navbar navbar-expand navbar-white fixed-top" style="width: 100%;
+border-bottom: 2px solid #dee2e6; display: inline-block; cursor: default; position: initial">
+    <div class="navbar-nav">
+        {# Конструктор контрактов #}
+        {% if request.user.is_superuser %}
+            <a href="/manage-contracts" class="nav-link{% if request.path == '/manage-contracts' %}
+            active text-bold{% endif %}">
+                Конструктор контрактов
+            </a>
+        {% endif %}
+        {# Дерево контрактов #}
+        <div class="nav-item dropdown">
+            <a class="dropdown-toggle nav-link
+                {% with '/contract /dictionary /tree' as list  %}
+                    {% if request.path in list.split %}
+                        active text-bold
+                    {% endif %}
+                {% endwith %}
+            " href="#" data-toggle="dropdown" aria-haspopup="true"
+               aria-expanded="false">
+              Объекты
+            </a>
+            <div class="dropdown-menu" aria-labelledby="shops_dropdown">
+                {{ request.session.contract_menu|safe }}
+            </div>
+        </div>
+        {# Черновики #}
+        <div class="nav-item dropdown">
+            <a class="dropdown-toggle nav-link
+                {% if request.path == '/contract-draft' %}
+                    active text-bold
+                {% endif %}
+            " href="#" data-toggle="dropdown" aria-haspopup="true"
+               aria-expanded="false">
+              Черновики <span {% if request.session.contract_draft_quantity %}class="text-red"{% endif %}>
+                ({{ request.session.contract_draft_quantity }})</span>
+            </a>
+            <div class="dropdown-menu" aria-labelledby="shops_dropdown">
+                {{ request.session.contract_draft_menu|safe }}
+            </div>
+        </div>
+    </div>
+</nav>

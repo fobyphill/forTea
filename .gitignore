@@ -1,0 +1,13 @@
+*.pyc
+.idea/
+.vscode/
+.env
+venv/
+__pycache__/
+*.py[cod]
+secret_key.txt
+login.txt
+pain_data.txt
+log.txt
+forteatoo/settings.py
+db.sqlite3

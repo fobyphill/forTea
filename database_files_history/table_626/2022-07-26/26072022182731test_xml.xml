@@ -1,0 +1,10 @@
+<TreeRoot>
+    <Element1 value1="Value1">
+        <SubElement1>SubElement1</SubElement1>
+        <SubElement2>SubElement2</SubElement2>
+    </Element1>
+    <Element2 value2="Value2">
+        <SubElement3>SubElement3</SubElement3>
+        <SubElement4>SubElement4</SubElement4>
+    </Element2>
+</TreeRoot>

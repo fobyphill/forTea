@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Тесты шаблон</title>
+</head>
+<body>
+    <form method="post">
+        {% csrf_token %}
+        <div class="form">
+          <span id="print">{{ data }}<span>
+          <input class="form-control" name="param_id"><input type="submit" class="btn btn-outline-primary" value="жми">
+        </div>
+    </form>
+</body>
+</html>
+
+<script>
+    var $add = document.getElementsByClassName('add')[0];
+    var $form = document.getElementsByClassName('form')[0];
+    $('#b_add_enum').addEventListener('click', function(event) {
+      var $input = document.createElement('input');
+      $input.placeholder = 'Введите значение';
+      $input.className('form-control');
+      $input.style.display = 'inline-block';
+      $input.style.width = '10rem';
+
+      $form.insertBefore($input, $add);
+    });
+</script>

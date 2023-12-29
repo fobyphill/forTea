@@ -1,0 +1,61 @@
+{% extends 'partials/../base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/catalogs/urls.js' %}"></script>
+    <script src="{% static 'js/constructors/manage-object.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="{{ message_class }}">{{ message|linebreaks }}</div>
+    {% endif %}
+    <div class="card">
+        <div class="card-body">
+            <h4>
+                <a href="{% if request.path == '/contract' %}contract{% else %}manage-object{% endif %}?class_id={{ request.GET.class_id }}">
+                    Конcтанта "{{ header.name }}" ID:{{ header.id }}
+                </a>
+            </h4>
+            <div class="row">
+                <div class="col">
+                    <table id="data-table" class="table table-hover table-responsive-md table_sort"
+                           style="width:100%">
+                        <thead>
+                            <tr style="cursor: pointer;" class="row">
+                                <th class="col-1 text-right col_sort">ID</th>
+                                <th class="col-3 text-center col_sort">Название</th>
+                                <th class="col text-right" >Значение</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% load l10n %}
+                            {% for a in alias %}
+                                <tr class="row">
+                                    <td class="col-1 text-right">{{ a.id|stringformat:'d' }}</td>
+                                    <td class="col-3">{{ a.name }}</td>
+                                    {% with get_value=a|get_item:a.id %}
+                                        <td class="col text-right"><div>{{ get_value.value|safe }}</div></td>
+                                    {% endwith %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}

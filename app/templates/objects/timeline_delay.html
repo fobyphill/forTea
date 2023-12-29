@@ -1,0 +1,19 @@
+<div class="tag-invis" id="div_tl_delay">
+    <div class="input-group">
+        <span class="input-group-text">Планирование</span>
+        <span class="form-control" id="s_delay_range"></span>
+
+    </div>
+    <div class="input-group mb-3">
+        <span class="input-group-text">От</span>
+        <input type="datetime-local" id="i_tl_delay_from" class="form-control" step="1">
+        <span class="input-group-text">До</span>
+        <input type="datetime-local" id="i_tl_delay_to" class="form-control" step="1">
+        <button type="button" class="btn btn-outline-secondary" onclick="change_tl_delay_interval()">
+            Обновить интервал планирования
+        </button>
+        <input type="range" class="form-control-range" id="i_delay_range" onchange="moove_delay()"
+               value="1" max="1" list="steplist_delay">
+        <datalist id="steplist_delay"></datalist>
+    </div>
+</div>

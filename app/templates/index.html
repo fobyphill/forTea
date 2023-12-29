@@ -1,0 +1,26 @@
+{% extends 'base/base.html' %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block content %}
+    <div class="card">
+        <div class="card-body">
+            <div class="row">
+                <div class="col">
+                    <table id="data-table" class="table table-hover table-responsive-md table_sort" style="width:100%">
+                        {% for a in alias %}
+                            <tr class="row">
+                                <td class="col-4"><h4>{{ a.name }}</h4></td>
+                                {% with formula_array=a|get_item:a.id %}
+                                    <td class="col text-center">{{ formula_array.value|safe }}</td>
+                                {% endwith %}
+                            </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

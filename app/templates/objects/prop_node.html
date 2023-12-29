@@ -1,0 +1,50 @@
+{% load my_filters %}
+<tr class="row{% if t.code == branch.code %} table-active{% endif %}"
+    onclick="{% if request.session.tem_object_manager.path == '/tree'%}select_table_branch(this){% else %}select_branch(this){% endif %}"
+    id="unit{{ t.code }}">
+    <td class="col" style="padding: 0">
+        {{ prefix|safe }}
+        {% if 'children' in t %}
+            {% if t.opened %}-{% else %}+{% endif %}
+        {% else %}&nbsp;{% endif %}
+        {% if t.opened %}
+            <img src="/static/img/pics/folder_opened_50.png" width='20px'>
+        {% else %}
+            <img src="/static/img/pics/folder_closed_50.png" width='20px'>
+        {% endif %}
+        {{ t.code }} {{ t.name }}
+        {% with path=request.session.temp_object_manager.path %}
+            {% if path != '/tree' %}
+                <a href="/tree?location={% if path == '/contract' %}c{% else %}t{% endif %}&class_id={{ request.session.temp_object_manager.tree_headers.0.parent_id }}&branch_code={{ t.code }}">
+                    <img src="/static/img/pics/edit_50.png" width='15px'>
+                </a>
+            {% endif %}
+        {% endwith %}
+    </td>
+    {% for vh in visible_headers %}
+        <td class="col-1-5 text-center" style="padding: 0">
+            {% with val=t.props|get_item:vh.id %}
+                {% if val.value %}
+                    {% if vh.formula == 'eval' %}
+                        {{ val.value|safe }}
+                    {% elif vh.formula == 'bool' %}
+                        {% if val.value %}&#x2713;{% endif %}
+                    {% elif vh.formula == 'datetime' %}
+                        {% if val.value %} {{ val.value|datetime_string_to_russian }}{% endif %}
+                    {% elif vh.formula == 'date' %}
+                        {% if val.value %} {{ val.value|date_string_to_russin }}{% endif %}
+                    {% else %}
+                        {{ val.value }}
+                    {% endif %}
+                {% endif %}
+            {% endwith %}
+        </td>
+    {% endfor %}
+</tr>
+{% if 'children' in t and t.opened %}
+    {% for ch in t.children %}
+        {% with t=ch prefix=prefix|add_spaces%}
+            {% include 'objects/prop_node.html' %}
+        {% endwith %}
+    {% endfor %}
+{% endif %}
