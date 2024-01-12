@@ -1,0 +1,181 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    .custom-file-input:lang(en)~.custom-file-label::after {
+        content: "Обзор";
+    }
+    input[type=range]{
+       height: 2px;
+        margin-top: 10px;
+        background-color: #195fb2;
+    }
+    li {
+        list-style-type: none;
+        cursor: pointer;
+    }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/objects/object-ajax.js' %}"></script>
+    <script src="{% static 'js/ajaxes.js' %}"></script>
+    <script src="{% static 'js/urls.js' %}"></script>
+    <script src="{% static 'js/objects/manage-object.js' %}"></script>
+    <script src="{% static 'js/objects/dicts.js' %}"></script>
+    <script src="{% static 'js/objects/objects.js' %}"></script>
+    <script src="{% static 'js/objects/obj-procedures.js' %}"></script>
+    <script type="text/javascript" src="{% static 'dompurfy/purify.min.js' %}"></script>
+    <script src="{% static 'html2canvas/html2canvas.min.js' %}"></script>
+    <script src="{% static 'jsPDF-master/dist/jspdf.umd.js' %}"></script>
+    <script src="{% static 'jsPDF-AutoTable-master/dist/jspdf.plugin.autotable.min.js' %}"></script>
+    <script type="text/javascript" src="{% static 'fonts/PTSans-normal.js' %}"></script>
+    <script>
+        function createPdfList_onButton() {
+            var doc = new jspdf.jsPDF();
+            doc.setFont('PTSans');
+            var Name_ref = "{{ class_name }}";
+            doc.text(10, 10, "Справочник "+Name_ref);
+            doc.autoTable({ html: '#data-table', styles: {fontSize:7, font: 'PTSans', fontStyle: 'normal'} });
+            window.open(doc.output('bloburl'), '_blank');
+        }
+    </script>
+   <script>
+        function createPdfObject_onButton() {
+            var parent_source = window.document.getElementsByClassName("col-6")[0];
+            var source = parent_source;
+
+            var doc = new jspdf.jsPDF('p','px','a4',true);
+            doc.setFont("PTSans","normal");
+            doc.setFontSize(7);
+            doc.setDisplayMode(1, 'single', 'UseOutlines');
+            var Name_ref = "{{ current_class.name }}";
+            doc.text(10, 10, "Справочник "+Name_ref);
+            window.html2canvas = html2canvas;
+            var elementHandler = {
+              '#ignorePDF': function (element, renderer) {
+                return true;
+              }
+            };
+            source.style.fontFamily = "PTSans";
+            source.style.flex = '0 0 80%';
+            source.style.maxWidth = '80%';
+            doc.html(
+                source,{
+                    html2canvas: {
+                        scale: 0.30,
+                    },
+                'x': 15,
+                'y': 15,
+                'elementHandlers': elementHandler
+                }).then(() => {
+                    window.open(doc.output('bloburl'), '_blank');
+                    source.style.fontFamily = "";
+                    source.style.flex = '0 0 50%';
+                    source.style.maxWidth = '50%';
+                });
+        }
+    </script>
+{% endblock %}
+
+{% block content %}
+    {% if current_class %}
+        <div class="{{ message_class }}" id="div_msg">{{ message|safe }}</div>
+        <div class="card">
+            <form id="form" onsubmit="return false" method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="card-body">
+                    <h4><a href="manage-object?class_id={{ request.GET.class_id }}">{{ title }} ID:
+                        {{ request.GET.class_id }}</a></h4>
+                    <div class="filter-block">
+                        <div class="my-inline-blocks">
+                            <span><b>Поиск</b></span>
+                        <input type="text" id="input_search" name="input_search" class="form-control search-filter"
+                               style="width: 240px;
+                        display: inline; padding: 0"
+                           {% if request.POST.object_code %}
+                                value="{{ request.POST.object_code }}"
+                           {% elif request.POST.input_search %}
+                               value="{{ request.POST.input_search }}"
+                           {% endif %}>
+                        {% if 'owners' in request.session.temp_object_manager %}
+                            <span><b>Собственник</b></span>
+                            <input class="form-control search-filter" name="input_owner"
+                                   {% if 'input_owner' in request.POST %}
+                                        value="{{ request.POST.input_owner }}"
+                                   {% endif %}
+                            list="list_owner" style="width: 5rem; display: inline; padding: 0">
+                            <datalist id="list_owner">
+                                {% for owner in request.session.temp_object_manager.owners %}
+                                    <option value="{{ owner.code }}">{{ owner.Наименование }}</option>
+                                {% endfor %}
+                            </datalist>
+                        {% endif %}
+                        <input type="button" onclick="send_form_with_param('page', '1')" value="Найти" class="btn btn-outline-primary" style="vertical-align: top;
+                        width: 130px;">
+                        <input type="button" onclick="createPdfList_onButton()" value="Export list" class="btn btn-outline-primary" style="vertical-align: top;
+                        width: 130px;">
+                        <input type="button" onclick="createPdfObject_onButton()" value="Export object" class="btn btn-outline-primary" style="vertical-align: top;
+                        width: 130px;">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col">
+                            {% if 'tree' in request.session.temp_object_manager %}
+                                {# дерево #}
+                                {% include 'objects/tree-table.html' %}
+                            {% endif %}
+                            {# Таблица данных #}
+                            {% include 'partials/../objects/object-table.html' %}
+                            {#  Пагинация#}
+                            {% include 'partials/../objects/pagination.html' %}
+                        </div>
+                        {# Управление#}
+                        {% include 'objects/control-form.html' %}
+                    </div>
+                </div>
+                {# скрытые поля #}
+                <div class="tag-invis">
+                    <input type="hidden" name="class_id" value="{{ request.GET.class_id }}">
+                        {% for dict in request.session.temp_object_manager.my_dicts %}
+                            <input type="hidden" id="dict_info{{ dict.id }}" name="dict_info{{ dict.id }}">
+                        {% endfor %}
+                    <input id="delete_dict" name="delete_dict">
+                    {# Заголовки полей #}
+                    {% for h in headers %}
+                        <span id="header_info{{ h.id }}">{{ h|json_dumps }}</span>
+                    {% endfor %}
+                    {# массивы #}
+                    <span id="s_arrays_hist"></span> {# история всех массивов #}
+                    <span id="s_arrays_today"></span> {# современные значения всех массивов #}
+                    {% for a in request.session.temp_object_manager.arrays %}
+                        <span id="s_array_{{ a.id }}"></span>
+                    {% endfor %}
+                    <input name="page" value="{{ request.POST.page }}">
+                    <span id="s_object_hist"></span>
+                    <span id="s_object_future"></span>
+                    <span id="s_current_version"></span>
+                    <span id="s_time_line_list"></span>
+                    <span id="s_drafts"></span>
+                </div>
+            </form>
+        </div>
+        {# Подсказки#}
+        <div>
+            <b>Подсказки:</b><br>
+            <span class="text-red">*</span> &mdash; поле, обязательное к заполнению
+        </div>
+    {% else %}
+        <h3>Справочников пока нет</h3>
+    {% endif %}
+
+
+{% endblock %}

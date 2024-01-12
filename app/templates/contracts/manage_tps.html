@@ -1,0 +1,53 @@
+{% load my_filters %}
+{% if h.id in lcf %}
+    <div style="border-left: 2px solid #dee2e6; margin-top: -1em" class="mb-3">
+        {% for tp in request.session.temp_object_manager.tps %}
+            {% if tp.cf == h.id %}
+                <div class="pl-5">
+                    <sub>
+                    {{ h.name }} = {% for s in tp.stages %}{{ s.name }}
+                    {% if not forloop.last %} + {% endif %}{% endfor %}
+                    <br><a target="_blank" href="tp-routing?tp={{ tp.id }}">Маршрутизация техпроцесса</a></sub>
+                </div>
+                <div class="input-group pl-5 mt">
+                    <span class="input-group-text" id="stp_id_{{ tp.id }}">{{ tp.name }}</span>
+                    <table class="form-control" style="height: auto; display: grid">
+                        <tr class="row">
+                            <td class="col-4"></td>
+                            <td class="col">
+                                <div class="row">
+                                    <div class="col text-center">
+                                        <label class="badge btn-secondary">State</label>
+                                    </div>
+                                    <div class="col text-center">
+                                        <label class="badge btn-secondary">Fact</label>
+                                    </div>
+                                    <div class="col text-center">
+                                        <label class="badge btn-secondary">Delay</label>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% for s in tp.stages %}
+                            <tr class="row">
+                                <td class="col-4 my-auto">{{ s.name }}</td>
+                                <td class="col">
+                                    <div class="input-group">
+                                        <input type="number" class="form-control text-right obj-prop"
+                                               oninput="csot({{ s.id }}, {{ s.parent_id }})"
+                                            id="i_stage_{{ s.id }}" name="i_stage_{{ s.id }}">
+                                        <span class="form-control text-right bg-light"
+                                        id="s_stage_{{ s.id }}_fact"></span>
+                                        <span class="form-control text-right bg-light"
+                                        id="s_stage_{{ s.id }}_delay"></span>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+{% endif %}
+

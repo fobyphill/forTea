@@ -1,0 +1,98 @@
+{% if current_class.formula == 'tp' %}
+    <div id="div_tp_sys_params">
+        <hr>
+        <h5>Управление системными параметрами техпроцесса</h5>
+        <table class="table table-hover table-responsive-md table_sort" id="tp_sys_params">
+            <thead>
+                <tr class="row" style="cursor: pointer; border-left: 1px solid #dee2e6">
+                    <th class="col-1 text-right" style="word-wrap: normal; padding: 0.75rem 0">ID</th>
+                    <th class="col-2 text-center">Название</th>
+                    <th class="col text-center">Значение</th>
+                </tr>
+            </thead>
+            <tbody id="tp_body_params">
+                {# business rule #}
+                <tr class="row" style="cursor: pointer; ">
+                    <td class="col-1 text-right" id="td_br_id">{{ system_props.business_rule.id }}</td>
+                    <td class="col-2 text-right" style="word-wrap: normal; padding: 0.75rem 0">Бизнес-правило</td>
+                    <td class="col"><textarea id="ta_br" class="text-red">опция в разработке</textarea></td>
+                </tr>
+                {# LinkMap #}
+                <tr class="row" style="cursor: pointer;">
+                    <td class="col-1 text-right" id="td_lm_id">{{ system_props.link_map.id }}</td>
+                    <td class="col-2 text-right" style="word-wrap: normal; padding: 0.75rem 0">ЛинкМап</td>
+                    <td class="col"><textarea id="ta_lm">опция в разработке</textarea></td>
+                </tr>
+                {# Trigger #}
+                <tr class="row" style="cursor: pointer;">
+                    <td class="col-1 text-right" id="td_tr_id">{{ system_props.trigger.id }}</td>
+                    <td class="col-2 text-right" style="word-wrap: normal; padding: 0.75rem 0">Триггер</td>
+                    <td class="col"><textarea id="ta_tr">опция в разработке</textarea></td>
+                </tr>
+            </tbody>
+        </table>
+        {% if request.user.is_superuser %}
+            <button class="col btn my-base-button" onclick="save_tp()" style="width: 125px" type="button">
+                Сохранить
+            </button>
+        {% endif %}
+    </div>
+    <div id="div_tp_stages">
+        <hr>
+        <h5>Управление стадиями техпроцесса</h5>
+        <table class="table table-hover table-responsive-md table_sort" id="tp_stages">
+            <thead>
+                <tr class="row" style="cursor: pointer; border-left: 1px solid #dee2e6">
+                    <th class="col-1 text-right" style="word-wrap: normal; padding: 0.75rem 0">ID</th>
+                    <th class="col-2 text-center">Название</th>
+                    <th class="col text-center">Ответственный</th>
+                    <th class="col text-center">Потомки</th>
+                </tr>
+            </thead>
+            <tbody id="tp_body_stages">
+                {% for stage in properties %}
+                    <tr class="row row-param" id="{{ stage.id }}" onclick="select_param(this, {'is_stage': true})">
+                        <td class="col-1 text-right">{{ stage.id }}</td>
+                        <td class="col-2 ">
+                            <input id="i_stage_name_{{ stage.id }}" class="form-control" value="{{ stage.name }}">
+                        </td>
+                        <td class="col">
+                            <input class="form-control" value="{{ stage.value.handler.id }}"
+                                   id="i_stage_handler_{{ stage.id }}" style="width: 4rem; display: inline"
+                            oninput="get_users(this, $('#dl_stage_handler_info_{{ stage.id }}')),
+                                    get_user_by_id(this.value, $('#s_stage_handler_info_{{ stage.id }}'))"
+                            onclick="init_input_user(this)" list="dl_stage_handler_info_{{ stage.id }}">
+                            <datalist id="dl_stage_handler_info_{{ stage.id }}"></datalist>
+                            <span id="s_stage_handler_info_{{ stage.id }}">{{ stage.value.handler.fio }}</span>
+                        </td>
+                        <td class="col">
+                            <div id="div_children_{{ stage.id }}">
+                                {% for ch in stage.value.children %}
+                                    <div class="row">
+                                        <div class="col-3 p-2 text-center">{{ ch.id }}</div>
+                                        <div class="col text-center p-2">{{ ch.name }}</div>
+                                        <div class="col-3 ">
+                                            <button class="btn btn-outline-secondary mx-4"
+                                                    onclick="this.parentElement.parentElement.remove();
+                                                $('#b_new_child_{{ stage.id }}').parent().parent().attr('class', 'row')">-</button>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                            <div {% if stage.value.children|length|add:1 == properties|length %}class="tag-invis"
+                                 {% else %}class="row"{% endif %}>
+                                <div class="col-3 ml-auto">
+                                <button class="btn btn-outline-primary mx-4" onclick="ancsotp(this.id.slice(12))"
+                                id="b_new_child_{{ stage.id }}">+</button>
+                            </div></div>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <button class="btn my-base-button" onclick="new_stage()" style="width: 125px" type="button" id="b_new_stage">Новая</button>
+        <button class="btn my-base-button" onclick="save_stages()" style="width: 125px" type="button">Сохранить</button>
+        <button class="btn btn-danger" onclick="$('#delete_tp_modal').modal('show')" style="width: 125px" type="button" disabled
+        id="b_delete_stage">Удалить</button>
+    </div>
+{% endif %}

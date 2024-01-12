@@ -1,0 +1,80 @@
+{% load static %}
+<!--Панель навигации-->
+<nav class="main-header navbar navbar-expand navbar-dark"
+     style="padding: 0; border-color: transparent; background-color:#195fb2; position: initial">
+    {# Левая панель #}
+    <div class="navbar-nav">
+        {# Главная #}
+        <a href="/" class="nav-link">
+            <img
+                {% if request.path == '/' %}
+                src="{% static 'img/logo4t_white_small.png' %}"
+                {% else %}
+                    src="{% static 'img/logo4t_blue_small.png' %}" onmouseover="this.src='{% static 'img/logo4t_hover.png' %}'"
+                    onmouseout="this.src='{% static 'img/logo4t_blue_small.png' %}'"
+                {% endif %}
+             height="100%"></a>
+        {# Справочники #}
+        {% if request.user.is_staff %}
+            {% with '/manage-class-tree /manage-object' as list %}
+                <a href="{% if request.user.is_superuser %}/manage-class-tree{% else %}/manage-object{% endif %}" class="nav-link
+                    {% if request.path in list.split %}
+                        active text-bold
+                    {% elif request.path == '/dictionary' and parent_type == 'table' %}
+                        active text-bold
+                    {% endif %}
+                ">Справочники</a>
+            {% endwith %}
+        {% endif %}
+        {# Контракты #}
+        {% with '/manage-contracts /contract' as list %}
+            <a href="{% if request.user.is_superuser %}/manage-contracts{% else %}/contract{% endif %}" class="nav-link
+                    {% if request.path in list.split %}
+                        active text-bold
+                    {% elif request.path == '/dictionary' and parent_type == 'contract' %}
+                        active text-bold
+                    {% endif %}
+                ">Контракты</a>
+        {% endwith %}
+        {# Задачи #}
+        <a class="nav-link{% if request.path == '/tasks' %} active text-bold {% endif %}" href="/tasks">Задачи
+            {% if request.session.tasks_quant %}
+                <span {% if request.session.tasks_quant.at %}class="text-warning"{% endif %}>
+                    ({{ request.session.tasks_quant.alt }}{% if request.session.tasks_quant.at %}|{{ request.session.tasks_quant.at }}{% endif %})
+                </span>
+            {% endif %}
+        </a>
+        {# история #}
+        <a href="/hist-reg" class="nav-link
+                {% if request.path == "/hist-reg" %}
+                    active text-bold
+                {% endif %}
+            ">История</a>
+
+    </div>
+    {# Правая панель #}
+    <div class="navbar-nav ml-auto">
+        <span class="nav-link" style="color: white; cursor: default">
+            {% if request.session.hour < 6 or request.session.hour > 22 %}
+                Доброй ночи,
+            {% elif request.session.hour < 11 %}
+                Доброе утро,
+            {% elif request.session.hour < 17 %}
+                Добрый день,
+            {% else %}
+                Добрый вечер,
+            {% endif %}
+                {{ request.user.first_name }} {{ request.user.last_name }}.
+        </span>
+        {% if request.user.is_superuser %}
+            <a class="nav-link" href="admin/auth/user" style="color: white">Users</a>
+        {% endif %}
+         <a class="nav-link" href="{% url 'logout' %}" style="color: white">
+            <span class="text-bold">Выход</span></a>
+        </a>
+    </div>
+</nav>
+
+
+
+

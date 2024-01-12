@@ -1,0 +1,197 @@
+@subtext-color: #777;
+@suggestions-bg-color: #fff;
+@subtext-label-color: #f5f5f5;
+
+.box-sizing(@sizing: border-box) {
+    -ms-box-sizing: @sizing;
+    -moz-box-sizing: @sizing;
+    -webkit-box-sizing: @sizing;
+    box-sizing: @sizing;
+}
+
+.rounded(@radius) {
+    -webkit-border-radius: @radius;
+    -moz-border-radius: @radius;
+    border-radius: @radius;
+}
+
+.suggestions-nowrap {
+    white-space: nowrap;
+}
+
+/**
+ * Основной INPUT
+ */
+.suggestions-input {
+    // IE9 can't determine border-style until it is specified in stylesheets
+    //  border: 1px solid grey;
+    .box-sizing();
+    width: 100%;
+
+    &::-ms-clear {
+        display: none;
+    }
+}
+
+.suggestions-wrapper {
+    position: relative;
+    margin: 0;
+    padding: 0;
+    vertical-align: top;
+
+    //Prevent font scaling in landscape while allowing user zoom
+    -webkit-text-size-adjust: 100%;
+}
+
+/**
+ * Выпадающий блок с найденными подсказками
+ */
+.suggestions-suggestions {
+    background: @suggestions-bg-color;
+    border: 1px solid #999;
+    .box-sizing;
+    cursor: default;
+    left: 0;
+    min-width: 100%;
+    position: absolute;
+    z-index: 9999;
+
+    //Prevent font scaling in landscape while allowing user zoom
+    -webkit-text-size-adjust: 100%;
+
+    strong {
+        font-weight: normal;
+        color: #3399ff;
+    }
+
+    &.suggestions-mobile {
+        border-style: none;
+
+        .suggestions-suggestion {
+            border-bottom: 1px solid #ddd;
+        }
+    }
+}
+
+/**
+ * Контейнер для одной подсказки
+ */
+.suggestions-suggestion {
+    padding: 4px 4px;
+    overflow: hidden;
+
+    &:hover {
+        background: darken(@suggestions-bg-color, 3%);
+    }
+}
+
+/**
+ * Выбранная (активная) подсказка
+ */
+.suggestions-selected {
+    background: darken(@suggestions-bg-color, 6%);
+
+    &:hover {
+        background: darken(@suggestions-bg-color, 6%);
+    }
+}
+
+/**
+ * Информационный блок в верхней части выпадашки с подсказками
+ */
+.suggestions-hint {
+    padding: 4px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    color: @subtext-color;
+    font-size: 85%;
+    line-height: 20px;
+}
+
+/**
+ * Дополнительный текст в подсказке, который идет второй строкой
+ */
+.suggestions-subtext {
+    color: @subtext-color;
+}
+
+/**
+ * Размещает дополнительный текст в одну строку с основным текстом подсказки
+ */
+.suggestions-subtext_inline {
+    display: inline-block;
+    min-width: 6em;
+    vertical-align: bottom;
+    margin: 0 0.5em 0 0;
+}
+
+/**
+ * Разделитель нескольких дополнительных текстов
+ */
+.suggestions-subtext-delimiter {
+    display: inline-block;
+    width: 2px;
+}
+
+/**
+ * Выделяет подсказку
+ */
+.suggestions-subtext_label {
+    margin: 0 0 0 0.25em;
+    .rounded(3px);
+    padding: 0 3px;
+
+    background: @subtext-label-color;
+    font-size: 85%;
+}
+
+.suggestions-value {
+    &[data-suggestion-status="LIQUIDATED"] {
+        position: relative;
+
+        &:after {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 50%;
+
+            border-top: 1px solid rgba(0, 0, 0, 0.4);
+
+            content: "";
+        }
+    }
+}
+
+/**
+ * Промо-блок
+ */
+.suggestions-promo {
+    font-size: 85%;
+    display: none;
+    color: @subtext-color;
+    padding: 4px;
+    text-align: center;
+    a {
+        color: @subtext-color;
+        display: block;
+        filter: grayscale(100%);
+        line-height: 20px;
+        text-decoration: none;
+    }
+    a:hover {
+        filter: grayscale(0);
+    }
+    svg {
+        height: 20px;
+        vertical-align: bottom;
+    }
+}
+
+@media screen and (min-width: 600px) {
+    .suggestions-promo {
+        position: absolute;
+        top: 0;
+        right: 0;
+        text-align: left;
+    }
+}

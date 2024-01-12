@@ -1,0 +1,42 @@
+<nav class="my-navbar navbar-expand navbar-white fixed-top" style="width: 100%;
+border-bottom: 2px solid #dee2e6; display: inline-block; cursor: default; position: initial">
+    <div class="navbar-nav">
+        {# Конструктор справочников #}
+        {% if request.user.is_superuser %}
+            <a href="/manage-class-tree" class="nav-link{% if request.path == '/manage-class-tree' %} active text-bold{% endif %}">
+                Конструктор справочников
+            </a>
+        {% endif %}
+        {# Дерево справочников #}
+        <div class="nav-item dropdown">
+            <a class="dropdown-toggle nav-link
+                {% with '/manage-object /tree /dictionary' as list %}
+                    {% if request.path in list.split %}
+                        active text-bold
+                    {% endif %}
+                " href="#" data-toggle="dropdown" aria-haspopup="true"
+                   aria-expanded="false">
+                  Объекты
+                {% endwith %}
+            </a>
+            <div class="dropdown-menu" aria-labelledby="shops_dropdown">
+                {{ request.session.class_menu|safe }}
+            </div>
+        </div>
+        {# Черновики #}
+        <div class="nav-item dropdown">
+            <a class="dropdown-toggle nav-link
+                {% if request.path == '/table-draft' %}
+                    active text-bold
+                {% endif %}
+            " href="#" data-toggle="dropdown" aria-haspopup="true"
+               aria-expanded="false">
+              Черновики <span {% if request.session.draft_quantity %}class="text-red"{% endif %}>
+                ({{ request.session.draft_quantity }})</span>
+            </a>
+            <div class="dropdown-menu" aria-labelledby="shops_dropdown">
+                {{ request.session.draft_menu|safe }}
+            </div>
+        </div>
+    </div>
+</nav>

@@ -1,0 +1,38 @@
+{% extends "layout.html" %}
+{%  block title %} Регистрация{% endblock %}
+{% block body %}
+    <h2>Регистрация</h2>
+    {% if message %}
+        <div>{{ message }}</div>
+    {% endif %}
+    <form action="{% url 'check_mail' %}" method="post">
+        {% csrf_token %}
+        <div class="form-group">
+            <input class="form-control" type="email" name="email" placeholder="Ваш Email" value="{{ request.session.email }}">
+        </div>
+        <div class="form-group">
+            <input class="form-control" type="tel" name="phone" placeholder="Ваш телефон" value="{{ request.session.phone }}"
+            pattern="\+7-[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" required>
+            <small>Введите телефон в формате:+7-123-456-78-90</small>
+        </div>
+        <div class="form-group">
+            <input class="form-control" type="password" name="password" placeholder="Пароль">
+        </div>
+        <div class="form-group">
+            <input class="form-control" type="password" name="confirmation" placeholder="Повторите пароль">
+        </div>
+        <div class="form-group">
+            <input class="form-control" type="text" name="first_name" placeholder="Ваше имя" value="{{ request.session.first_name }}">
+        </div>
+        <div class="form-group">
+            <input class="form-control" type="text" name="last_name" placeholder="Ваша фамилия" value="{{ request.session.last_name }}">
+        </div>
+        <div class="form-group">
+            <input class="form-control" type="text" name="inn" placeholder="Ваш ИНН" value="{{ request.session.inn }}">
+        </div>
+    <input class="btn btn-primary" type="submit" value="Зарегистрироваться">
+    </form>
+
+    Уже зерегистрированы? <a href="{% url 'login' %}">Войдите</a>
+
+{% endblock %}

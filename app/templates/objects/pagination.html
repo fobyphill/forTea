@@ -1,0 +1,33 @@
+<div style="text-align: center">
+    {% if paginator.page_num > 1 %}
+        <button onclick="send_form_with_param('page', '1')" class="like-a">&nbsp; << &nbsp;</button>
+{#        <a href="{{ request.path }}?{{ path_without_page }}&page=1"> &nbsp; << &nbsp; </a>#}
+    {% endif %}
+    {% if paginator.items_pages.has_previous %}
+        <button onclick="send_form_with_param('page', '{{ paginator.items_pages.previous_page_number }}')"
+                class="like-a">&nbsp; < &nbsp;</button>
+{#        <a href="{{ request.path }}?{{ path_without_page }}&page={{ paginator.items_pages.previous_page_number }}">&nbsp; < &nbsp;</a>#}
+    {% endif %}
+    Страница {{ paginator.page_num }} из {{ paginator.pages_count }}
+    {% if paginator.items_pages.has_next %}
+        <button onclick="send_form_with_param('page', '{{ paginator.items_pages.next_page_number }}')"
+                class="like-a">&nbsp; > &nbsp;</button>
+{#        <a href="{{ request.path }}?{{ path_without_page }}&page={{ paginator.items_pages.next_page_number }}"> &nbsp; > &nbsp; </a>#}
+    {% endif %}
+    {% if paginator.page_num != paginator.pages_count %}
+        <button onclick="send_form_with_param('page', '{{ paginator.pages_count }}')"
+                class="like-a">&nbsp; >> &nbsp;</button>
+{#        <a href="{{ request.path }}?{{ path_without_page }}&page={{ paginator.pages_count }}"> &nbsp; >> &nbsp; </a>#}
+    {% endif %}
+    <select name="q_items_on_page" onchange="this.form.submit()" style="cursor: pointer">
+        {% with '10 20 50 100' as list %}
+            {% for i in list.split %}
+                <option value="{{ i }}"
+                    {% if i == paginator.q_items_on_page|stringformat:'d' %}
+                        selected
+                    {% endif %}
+                >{{ i }}</option>
+            {% endfor %}
+        {% endwith %}
+    </select>
+</div>

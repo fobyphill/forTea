@@ -1,0 +1,61 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{% endblock %}</title>
+    <link rel="shortcut icon" type="image/png" href="{% static 'img/favicon.png' %}"/>
+    {# Подгружаем редактор формул #}
+    <link rel="stylesheet" href="{% static 'codemirror/lib/codemirror.css' %}">
+    <link rel='stylesheet' href="{% static 'codemirror/theme/shadowfox.css' %}">
+    <link rel='stylesheet' href="{% static 'codemirror/addon/hint/show-hint.css' %}">
+    {% include 'base/css-links.html' %}
+    <style>
+         .no-sidebar {
+             margin-left: 0 !important;
+         }
+
+         @media (min-width: 768px) {
+             body:not(.sidebar-mini-md) .content-wrapper, body:not(.sidebar-mini-md) .main-footer, body:not(.sidebar-mini-md) .main-header {
+                transition: margin-left .3s ease-in-out;
+                margin-left: 0 !important;
+            }
+         }
+        .vert-right-splitter{
+            border-right: 2px solid #dee2e6;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="hold-transition layout-fixed layout-navbar-fixed"><!--layout-footer-fixed-->
+    <script src="{% static 'codemirror/lib/codemirror.js' %}"></script>
+    <script src="{% static 'codemirror/mode/python/python.js' %}"></script>
+    <script src="{% static 'codemirror/addon/display/autorefresh.js' %}"></script>
+    <script src="{% static 'codemirror/addon/hint/show-hint.js' %}"></script>
+    <div class="wrapper">
+        <!-- Navbar -->
+        {% include 'base/navbar.html' %}
+        {# dinamic bar #}
+        {% include 'base/dinamic_bar.html' %}
+        <!-- Main Sidebar Container -->
+        <!-- Content Wrapper. Contains page content -->
+        <div class="content-wrapper no-sidebar" style="margin-top: 10px">
+
+            <!-- Main content -->
+            <section class="content">
+                <div class="container-fluid">
+                    {% block content %}{% endblock %}
+                </div>
+            </section>
+            <!-- /.content -->
+        </div>
+        <!-- /.content-wrapper -->
+
+        <!-- Main Footer -->
+        {% include 'base/footer.html' %}
+        {% include 'base/js-links.html' %}
+        {% block extra_js %}{% endblock %}
+    </div>
+</body>
+</html>

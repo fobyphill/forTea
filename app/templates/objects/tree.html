@@ -1,0 +1,339 @@
+{% extends 'partials/../base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    .custom-file-input:lang(en)~.custom-file-label::after {
+        content: "Обзор";
+    }
+    li {
+        list-style-type: none;
+        cursor: pointer;
+    }
+    input[type=range]{
+       height: 2px;
+        margin-top: 10px;
+        background-color: #195fb2;
+    }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/objects/tree.js' %}"></script>
+    <script src="{% static 'js/constructors/constructors-ajax.js' %}"></script>
+    <script src="{% static 'js/urls.js' %}"></script>
+    <script src="{% static 'js/objects/objects.js' %}"></script>
+    <script type="text/javascript" src="{% static 'dompurfy/purify.min.js' %}"></script>
+    <script src="{% static 'html2canvas/html2canvas.min.js' %}"></script>
+    <script src="{% static 'jsPDF-master/dist/jspdf.umd.js' %}"></script>
+    <script src="{% static 'jsPDF-AutoTable-master/dist/jspdf.plugin.autotable.min.js' %}"></script>
+    <script type="text/javascript" src="{% static 'fonts/PTSans-normal.js' %}"></script>
+    <script>
+        function createPdfList_onButton() {
+            var doc = new jspdf.jsPDF();
+            doc.setFont('PTSans');
+            var Name_ref = "{{ class_name }}";
+            doc.text(10, 10, "Справочник "+Name_ref);
+            doc.autoTable({ html: '#data-table', styles: {fontSize:7, font: 'PTSans', fontStyle: 'normal'} });
+            window.open(doc.output('bloburl'), '_blank');
+        }
+    </script>
+   <script>
+        function createPdfObject_onButton() {
+            var parent_source = window.document.getElementsByClassName("col-6")[0];
+            var source = parent_source;
+
+            var doc = new jspdf.jsPDF('p','px','a4',true);
+            doc.setFont("PTSans","normal");
+            doc.setFontSize(7);
+            doc.setDisplayMode(1, 'single', 'UseOutlines');
+            var Name_ref = "{{ class_name }}";
+            doc.text(10, 10, "Справочник "+Name_ref);
+            window.html2canvas = html2canvas;
+            var elementHandler = {
+              '#ignorePDF': function (element, renderer) {
+                return true;
+              }
+            };
+            source.style.fontFamily = "PTSans";
+            source.style.flex = '0 0 80%';
+            source.style.maxWidth = '80%';
+            doc.html(
+                source,{
+                    html2canvas: {
+                        scale: 0.30,
+                    },
+                'x': 15,
+                'y': 15,
+                'elementHandlers': elementHandler
+                }).then(() => {
+                    window.open(doc.output('bloburl'), '_blank');
+                    source.style.fontFamily = "";
+                    source.style.flex = '0 0 50%';
+                    source.style.maxWidth = '50%';
+                });
+        }
+    </script>
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="{{ message_class }}">{{ message|linebreaks }}</div>
+    {% endif %}
+    <div class="card">
+        <form id="form" onsubmit="return false" method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="card-body">
+                <h4><a href="tree?class_id={{ request.GET.class_id }}&location={{ request.GET.location }}">{{ title }} ID:
+                    {{ request.GET.class_id }}</a></h4>
+                <div class="filter-block">
+                    <div class="my-inline-blocks">
+                        <span><b>Поиск</b></span>
+                    <input type="text" id="input_search" name="input_search" class="form-control search-filter"
+                           style="width: 240px;
+                    display: inline; padding: 0"
+                       {% if request.POST.input_search %}
+                           value="{{ request.POST.input_search }}"
+                       {% endif %}>
+                    <input type="button" onclick="send_form_with_param(null)" value="Найти" class="btn btn-outline-primary" style="vertical-align: top;
+                    width: 130px;">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        {# Дерево #}
+                        {% include 'objects/tree-table.html' %}
+                    </div>
+                    {# Управление#}
+                    <div class="col-6">
+                        {# Код объекта #}
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">Код</span>
+                            <input id="i_code" name="i_code" readonly class="form-control"
+                                   style="background-color: white" value="{{ branch.code }}">
+                        </div>
+                        {# Название ветки #}
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">Наименование<sup class="text-red">*</sup></span>
+                            <input id="i_name" name="i_name" class="form-control" value="{{ branch.name }}">
+                        </div>
+                        {# Родитель #}
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">Родитель</span>
+                            <input id="i_parent" name="i_parent" class="form-control" type="number"
+                                   value="{{ branch.parent|stringformat:'d' }}">
+                        </div>
+                        {% for h in request.session.temp_object_manager.headers %}
+                            {% if h.name != 'is_right_tree' and h.name != 'name' and h.name != 'parent' %}
+                                <div class="input-group mb-3">
+                                    <span class="input-group-text">
+                                        {{ h.name }}{% if h.is_required %}<sup class="text-red">*</sup>{% endif %}
+                                    </span>
+                                    {% with val=branch.props|get_item:h.id%}
+                                        {% if h.formula == 'bool' %}
+                                            <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                <div class="input-group">
+                                                    <div class="input-group-text">
+                                                        <input type="checkbox" id="chb_{{ h.id|stringformat:'d' }}"
+                                                            name="chb_bool_{{ h.id|stringformat:'d' }}" class="obj-prop"
+                                                        {% if val.value == True %} checked{% endif %}>
+                                                    </div>
+                                                </div>
+                                                {% if is_contract or h.delay %}
+                                                    <div class="input-group">
+                                                        <div class="input-group-text bg-light">
+                                                            <input type="checkbox" id="chb_{{ h.id|stringformat:'d' }}_delay"
+                                                                value="True" onclick="return false">
+                                                        </div>
+                                                        <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                                                type="datetime-local">
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% elif h.formula == 'float' %}
+                                            <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                <div class="input-group">
+                                                    <input type="number" class="form-control" value="{{ val.value }}"
+                                                        id="i_float_{{ h.id|stringformat:'d' }}"
+                                                        name="i_float_{{ h.id|stringformat:'d' }}">
+                                                </div>
+                                                {% if is_contract or h.delay %}
+                                                    <div class="input-group">
+                                                        <input class="form-control obj-prop" id="i_float_{{ h.id|stringformat:'d' }}_delay"
+                                                           type="number" readonly {% if h.id in lcf %} oninput="recount_tps(this, true)" {% endif %} >
+                                                        <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                                            type="datetime-local">
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% elif h.formula == 'link' %}
+                                            <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                <div class="input-group">
+                                                    <input class="form-control" style="width: 7rem; flex: none"
+                                                        value="{{ val.value }}" id="i_link_{{ h.id|stringformat:'d' }}"
+                                                        name="i_link_{{ h.id|stringformat:'d' }}"
+                                                        oninput="get_link_ajax(this, {% if h.value.0 == 'c' %}true{% else %}false{% endif %}),
+                                                        promp_link(this, {% if h.value.0 == 'c' %}true{% else %}false{% endif %})"
+                                                        list="dl_{{ h.id|stringformat:'d' }}">
+                                                    <datalist id="dl_{{ h.id|stringformat:'d' }}"></datalist>
+                                                    <span class="input-group-text" id="s_link_{{ h.id|stringformat:'d' }}">{{ val.data|get_link }}</span>
+                                                </div>
+                                                {% if is_contract or h.delay %}
+                                                    <div class="input-group">
+                                                        <input class="form-control obj-prop" id="i_link_{{ h.id|stringformat:'d' }}_delay"
+                                                           type="number" readonly style="width: 7rem; flex: none">
+                                                        <span class="input-group-text" id="s_link_{{ h.id|stringformat:'d' }}_delay"></span>
+                                                        <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                                            type="datetime-local">
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% elif h.formula == 'datetime' %}
+                                                <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                    <div class="input-group">
+                                                        <input class="form-control" id="i_datetime_{{ h.id|stringformat:'d' }}"
+                                                            name="i_datetime_{{ h.id|stringformat:'d' }}" type="datetime-local"
+                                                        value="{{ val.value }}">
+                                                    </div>
+                                                    {% if is_contract or h.delay %}
+                                                        <div class="input-group">
+                                                            <input class="form-control obj-prop" id="i_datetime_{{ h.id|stringformat:'d' }}_delay"
+                                                                type="datetime-local" readonly>
+                                                            <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                                                type="datetime-local">
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                        {% elif h.formula == 'date' %}
+                                            <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                <div class="input-group">
+                                                    <input type="date" class="form-control" value="{{ val.value }}"
+                                                    id="i_date_{{ h.id|stringformat:'d' }}" name="i_date_{{ h.id|stringformat:'d' }}">
+                                                </div>
+                                                {% if is_contract or h.delay %}
+                                                    <div class="input-group">
+                                                        <input class="form-control obj-prop" id="i_date_{{ h.id|stringformat:'d' }}_delay"
+                                                            type="date" readonly>
+                                                        <input class="date4delay" id="i_date_{{ h.id|stringformat:'d' }}_delay_date"
+                                                            type="date">
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% elif h.formula == 'enum' %}
+                                            <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                <div class="input-group">
+                                                    <select type="datetime-local" class="form-control" id="s_enum_{{ h.id|stringformat:'d' }}"
+                                                        name="s_enum_{{ h.id|stringformat:'d' }}">
+                                                        {% for hv in h.value %}
+                                                            <option value="{{ hv }}"
+                                                            {% if val.value and val.value == hv %} selected{% endif %}
+                                                            >{{ hv }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                                {% if is_contract or h.delay %}
+                                                    <div class="input-group">
+                                                        <select class="form-control obj-prop" id="s_enum_{{ h.id|stringformat:'d' }}_delay"
+                                                            readonly="">
+                                                            {% for enum in h.value %}
+                                                                <option value="{{ enum }}">{{ enum }}</option>
+                                                            {% endfor %}
+                                                        </select>
+                                                        <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay"
+                                                            type="datetime-local">
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% elif h.formula == 'eval' %}
+                                            <div class="form-control" id="div_eval_{{ h.id|stringformat:'d' }}"
+                                                 style="height: auto">{% if val.value %}{{ val.value|safe }}{% endif %}</div>
+                                        {% elif h.formula == 'const' %}
+                                            <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                <div class="input-group">
+                                                    <div class="form-control" id="div_alias_{{ h.id|stringformat:'d' }}">
+                                                        {{ val.result|safe }}
+                                                    </div>
+                                                    <select class="form-control" id="s_alias_{{ h.id|stringformat:'d' }}"
+                                                        name="s_alias_{{ h.id|stringformat:'d' }}" onchange="recount_alias(this)">
+                                                        {% for item in h.const %}
+                                                            <option value="{{ item.id }}"
+                                                                {% if item.id == val.value %} selected{% endif %}
+                                                            >{{ item.name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                                {% if is_contract or h.delay %}
+                                                    <div class="input-group">
+                                                        <div class="form-control" id="div_alias_{{ h.id|stringformat:'d' }}_delay"
+                                                        style="background-color: #e9ecef"></div>
+                                                        <select class="form-control" id="s_alias_{{ h.id|stringformat:'d' }}_delay"
+                                                            readonly="">
+                                                            {% for c in h.const %}
+                                                                <option value="{{ c.id }}">{{ c.name }}</option>
+                                                            {% endfor %}
+                                                        </select>
+                                                        <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay"
+                                                            type="datetime-local">
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% else %}
+                                            <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0">
+                                                <div class="input-group"> {# fact #}
+                                                    <textarea class="form-control" style="min-height: 1rem; height: auto"
+                                                      id="ta_string_{{ h.id|stringformat:'d' }}"
+                                                      name="ta_string_{{ h.id|stringformat:'d' }}"
+                                                    >{% if val %}{{ val.value }}{% endif %}</textarea>
+                                                </div>
+                                                {% if is_contract or h.delay %}
+                                                    <div class="input-group">
+                                                        <textarea class="form-control obj-prop" name="ta_{{h.id|stringformat:'d' }}_delay"
+                                                          id="ta_{{ h.id|stringformat:'d' }}" readonly
+                                                          style="min-height: 1rem; height: auto"></textarea>
+                                                        <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                                            type="datetime-local">
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% endif %}
+                                    {% endwith %}
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                        {# Кнопки управления #}
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-primary" style="background-color: #195fb2;
+                            border-color: #195fb2; min-width: 100px" onclick="new_branch()">
+                                Новый</button>
+                            <button type="button" class="btn btn-primary" style="background-color: #195fb2;
+                            border-color: #195fb2; min-width: 100px" onclick="send_form_with_param('b_save')">
+                                Сохранить</button>
+                            <button type="button" class="btn btn-danger" style="min-width: 100px"
+                                    onclick="$('#delete_object_modal').modal('show');" >
+                                Удалить</button>
+                        </div>
+                        {# Модальные окна #}
+                        {% include 'objects/modal_windows_objects.html' %}
+                    </div>
+                </div>
+            </div>
+            {# скрытые поля #}
+            <div class="tag-invis">
+                <div id="div_headers">{{ request.session.temp_object_manager.headers|json_dumps }}</div>
+            </div>
+        </form>
+    </div>
+    {# Подсказки#}
+    <div>
+        <b>Подсказки:</b><br>
+        <span class="text-red">*</span> &mdash; поле, обязательное к заполнению
+    </div>
+
+{% endblock %}

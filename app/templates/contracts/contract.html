@@ -1,0 +1,124 @@
+{% extends 'partials/../base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    .custom-file-input:lang(en)~.custom-file-label::after {
+        content: "Обзор";
+    }
+    input[type=range]{
+       height: 2px;
+        margin-top: 10px;
+        background-color: #195fb2;
+    }
+    li {
+        list-style-type: none;
+        cursor: pointer;
+    }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/objects/object-ajax.js' %}"></script>
+    <script src="{% static 'js/ajaxes.js' %}"></script>
+    <script src="{% static 'js/urls.js' %}"></script>
+    <script src="{% static 'js/objects/contract.js' %}"></script>
+    <script src="{% static 'js/objects/dicts.js' %}"></script>
+    <script src="{% static 'js/objects/objects.js' %}"></script>
+    <script src="{% static 'js/objects/obj-procedures.js' %}"></script>
+    <script src="{% static 'js/business-rule.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+    {% if current_class %}
+        <div class="{{ message_class }}" id="div_msg">{{ message|safe }}</div>
+        <div class="card">
+            <form id="form" onsubmit="return false" method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="card-body">
+                    <h4><a href="contract?class_id={{ request.GET.class_id }}">{{ title }} ID:
+                        {{ request.GET.class_id }}</a></h4>
+                    <div class="filter-block">
+                        <div class="my-inline-blocks">
+                            <span><b>Поиск</b></span>
+                        <input type="text" id="input_search" name="input_search" class="form-control search-filter"
+                               style="width: 240px; display: inline; padding: 0"
+                               {% if request.POST.object_code %}
+                                    value="{{ request.POST.object_code }}"
+                               {% else %}
+                                    value="{{ request.POST.input_search }}"
+                                {% endif %}>
+                        {% if 'owners' in request.session.temp_object_manager %}
+                            <span><b>Собственник</b></span>
+                            <input class="form-control search-filter" name="input_owner" value="{{ request.POST.input_owner }}"
+                            list="list_owner" style="width: 5rem; display: inline; padding: 0">
+                            <datalist id="list_owner">
+                                {% for owner in request.session.temp_object_manager.owners %}
+                                    <option value="{{ owner.code }}">{{ owner.Наименование }}</option>
+                                {% endfor %}
+                            </datalist>
+                        {% endif %}
+                        <input type="button" onclick="send_form_with_param(null)" value="Найти" class="btn btn-outline-primary" style="vertical-align: top;
+                        width: 130px;">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col">
+                            {# дерево #}
+                            {% if request.session.temp_object_manager.tree %}
+                                {% include 'objects/tree-table.html' %}
+                            {% endif %}
+                            {# Таблица данных #}
+                            {% include 'objects/object-table.html' %}
+                            {#  Пагинация#}
+                            {% include 'objects/pagination.html' %}
+                        </div>
+                        {# Управление#}
+                        {% include 'objects/control-form.html' %}
+                    </div>
+                </div>
+                {# скрытые поля #}
+                <div class="tag-invis">
+                    <input type="hidden" name="class_id" value="{{ request.GET.class_id }}">
+                    {% for dict in request.session.temp_object_manager.my_dicts %}
+                        <input type="hidden" id="dict_info{{ dict.id }}" name="dict_info{{ dict.id }}">
+                    {% endfor %}
+                    <input id="delete_dict" name="delete_dict">
+                {# Заголовки полей #}
+                {% for h in headers %}
+                    <span id="header_info{{ h.id }}">{{ h|json_dumps }}</span>
+                {% endfor %}
+                {# массивы #}
+                <span id="s_arrays_hist"></span> {# история всех массивов #}
+    {#            <span id="s_arrays_today"></span> {# современные значения всех массивов #}
+                {% for a in request.session.temp_object_manager.arrays %}
+                    <span id="s_array_{{ a.id }}"></span>
+                {% endfor %}
+                {# Техпроцессы #}
+                <span id="tps">{{ request.session.temp_object_manager.tps|json_dumps }}</span>
+                <span id="tps2">{{ request.session.temp_object_manager.tps4fe|json_dumps }}</span>
+                <input name="page" value="{{ request.POST.page }}">
+                <span id="s_object_hist"></span>
+                <span id="s_current_version"></span>
+                <span id="s_time_line_list"></span>
+                <span id="s_drafts"></span>
+                </div>
+            </form>
+        </div>
+        {# Подсказки#}
+        <div>
+            <b>Подсказки:</b><br>
+            <span class="text-red">*</span> &mdash; поле, обязательное к заполнению
+        </div>
+    {% else %}
+        <h3>Контрактов пока нет</h3>
+    {% endif %}
+
+{% endblock %}

@@ -1,0 +1,77 @@
+{% load my_filters %}
+<table id="data-table" class="table table-hover table-responsive-md table_sort"
+       style="width:100%">
+    <thead>
+        <tr style="cursor: pointer;" class="row">
+            <th class="col-1 text-right col_sort">Код</th>
+            {% for h in headers %}
+                {% if h.is_visible %}
+                    <th class="col text-center col_sort">{{ h.name }}</th>
+                {% endif %}
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% load l10n %}
+        {% for object in objects %}
+            <tr
+                {% if request.POST.i_code == object.code|stringformat:'d' %}
+                    class="row table-active"
+                {% else %}
+                    class="row"
+                {% endif %}
+                    onclick="sao(this, 'd')"
+                id="{{ object.code|stringformat:'d' }}">
+                <td class="col-1 text-right">{{ object.code|stringformat:'d'  }}</td>
+                {% for h in headers %}
+                    {% if h.is_visible %}
+                        <td id="{{ h.id }}|{{ object.code|stringformat:'d' }}" class="col text-center">
+                            {% if h.formula == 'bool' %} {# Если булевый тип #}
+                                {% with bool_type=object|get_item:h.id %}
+                                    <span class="tag-invis">{{ bool_type.value }}</span>
+                                    <input type="checkbox" onclick="javascript: return false;"
+                                        {% if bool_type.value == 'True' %} checked{% endif %}>
+                                {% endwith %}
+                            {% elif h.formula == 'link' %}  {# Если ссылочный тип #}
+                                {% with link_data=object|get_item:h.id %}
+                                    {% if link_data.value %}
+                                        <a target="_blank" onclick="event.stopPropagation()"
+                                           href="/{% if link_data.data.type.0 == 't' %}manage-object{% else %}contract{% endif %}?class_id={{ link_data.data.parent_structure }}&object_code={{ link_data.data.code }}">
+                                         {% for v in link_data.data.values %}
+                                             {% if v.name == 'Наименование' and link_data.data.type == 'table' or v.name == 'Дата и время записи' and link_data.data.type == 'contract' %}
+                                                 {% if link_data.data.type == 'contract' %}
+                                                     {{ v.value|datetime_string_to_russian }}
+                                                 {% else %}
+                                                    {{ v.value }}
+                                                 {% endif %}
+                                             {% endif %}
+                                         {% endfor %}
+                                        </a>
+                                    {% endif %}
+                                {% endwith %}
+                            {% elif h.formula == 'datetime' %} {# Датавремя #}
+                                {% with datetime_object=object|get_item:h.id %}
+                                    <span id="idtr_{{ h.id }}|{{ object.code }}">
+                                        {{ datetime_object.value|datetime_string_to_russian }}
+                                    </span>
+                                {% endwith %}
+                            {% elif h.formula == 'date' %}  {# Дата #}
+                                {% with date_object=object|get_item:h.id %}
+                                    {{ date_object.value|date_string_to_russin }}
+                                {% endwith %}
+                            {% elif h.formula == 'enum' %}  {# Перечисление #}
+                                {% with enum_object=object|get_item:h.id %}
+                                    {{ enum_object.value }}
+                                {% endwith %}
+                            {% elif h.formula == 'const' %}  {# Если тип данных - константа #}
+                                {% with formula=object|get_item:h.id %}
+                                    <span id="{{ h.id}}|{{formula.value }}">{{ formula.result|floatformat:2 }}</span>
+                                {% endwith %}
+                            {% else %}{% with cell=object|get_item:h.id %}{% if cell.value %}{{ cell.value|safe }}{% endif %}{% endwith %}{% endif %}
+                        </td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+        {% endfor %}
+    </tbody>
+    </table>

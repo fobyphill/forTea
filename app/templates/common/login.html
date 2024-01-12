@@ -1,0 +1,43 @@
+{% extends "common/layout.html" %}
+{% block title %}Вход{% endblock %}
+{% block body %}
+{% load static %}
+    <div class="row" style="vertical-align: middle">
+    <div class="col" style="padding: 0"></div>
+    <div class="col-4" style="padding: 0">
+        {% if message %}
+            <div>{{ message }}</div>
+        {% endif %}
+        <div class="row" >
+            <div class="col" style="padding: 0">
+                <span class="display-3">ForTea</span>
+                <h4>Войти в систему</h4>
+            </div>
+            <div class="col-3" style="padding: 0">
+                <img src="{% static 'img/4t_logo.png' %}" width="100%">
+            </div>
+        </div>
+        <div class="row">
+            <div class="col" style="padding: 0">
+                <form action="{% url 'index' %}" method="post">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <input autofocus class="form-control" name="email" placeholder="Email">
+                    </div>
+                    <div class="form-group">
+                        <input class="form-control" type="password" name="password" placeholder="Пароль">
+                    </div>
+                    <input class="btn btn-primary" type="submit" value="Войти">
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col" style="padding: 0"></div>
+    </div>
+
+
+
+
+{#    У Вас нет аккаунта? <a href="{% url 'register' %}">Зарегистрируйтесь.</a>#}
+
+{% endblock %}

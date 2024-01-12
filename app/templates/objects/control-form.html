@@ -1,0 +1,390 @@
+<div class="col-6">
+    {# Черновики #}
+    {% if objects.0.type == 'table' %}
+        <div class="tag-invis" id="d_drafts">
+            <span class="input-group-text">Черновики</span>
+            <select class="form-control" id="s_draft_vers" name="s_draft_vers"
+                    onchange="select_draft(this)"></select>
+        </div>
+    {% endif %}
+    {# Ползунок истории #}
+    {% include 'objects/timeline_slider.html' %}
+    {# Ползунок делеев #}
+    {% include 'objects/timeline_delay.html' %}
+    {# бизнес-правило и условие выполнения #}
+    {% if current_class.formula == 'contract' %}
+        <div class="input-group mb-3">
+            <span class="input-group-text" id="span_br">Бизнес-правило</span>
+            <div class="input-group-text">
+                <input id="chb_br" type="checkbox" checked onclick="return false">
+            </div>
+        </div>
+        <div class="input-group mb-3">
+            <span class="input-group-text" id="span_dtc">Дата и время создания</span>
+            <div class="input-group-text">
+                <input id="i_dtc" type="datetime-local" readonly class="form-control">
+            </div>
+        </div>
+        <div class="input-group mb-3">
+            <span class="input-group-text" id="span_br">Условие выполнения</span>
+            <div class="input-group-text">
+                <input id="chb_cc" type="checkbox" onclick="return false">
+            </div>
+        </div>
+    {% endif %}
+    {# Код объекта #}
+    <div class="input-group mb-3">
+        <span class="input-group-text"><a target="_blank" id="a_code">Код</a></span>
+        <input id="i_code" name="i_code" readonly class="form-control obj-prop" style="background-color: white">
+    </div>
+    {% if 'tree' in request.session.temp_object_manager %}
+        {# Родительская ветка #}
+        <div class="input-group mb-3">
+            <span class="input-group-text">Ветка</span>
+            <input id="i_branch" name="i_branch" type="number" class="form-control" style="background-color: white"
+            value="{% if 'branch_code' in request.POST %}{{ request.POST.branch_code }}{% elif 'i_branch' in request.POST %}{{ request.POST.i_branch }}{% endif %}">
+        </div>
+    {% endif %}
+    {% for h in headers %}
+        {% if h.name == 'system_data' %}
+        {% elif h.formula == 'array' %}
+            <div style="margin: 0 0 -0.5rem 0.5rem; z-index: 5">
+                <span class="badge label-prop-name">
+                    <a target="_blank" href="{{ request.path }}?class_id={{ h.id }}&input_owner=" id="a_array_{{ h.id }}">
+                        {{ h.name }}
+                    </a>
+                </span>
+                <button class="badge label-prop-name" style="border: 0" data-toggle="modal" data-target="#myModal">Редактировать</button>
+            </div>
+            <div class="modal fade" id="myModal" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-xl">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <iframe id="iframe_{{ h.id }}" width="100%" height="600" scrolling="yes" loading="lazy"
+                                sandbox="allow-same-origin allow-modals allow-scripts allow-forms" frameborder="0"
+                            src="{{ request.path }}?class_id={{ h.id }}&input_owner=">
+                            </iframe>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" name="close-btn"
+                                onclick="ref_page()" data-dismiss="modal">Закрыть</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div style="border: 1px solid #ced4da; border-radius: 0.25rem;" class="mb-3">
+                <div id="div_table_slave_{{ h.id }}">
+                    {% include 'objects/array-table.html' %}
+                </div>
+            </div>
+        {% else %}
+            {# Заголовок поля #}
+            <div style="margin: 0 0 -0.5rem 1.2rem">
+                <span class="badge label-prop-name"><a target="_blank" id="a_label_{{ h.id }}">{{ h.name }}</a></span>
+                {% if h.is_required and h.name != 'Дата и время записи' %}<span class="text-red">*</span>{% endif %}
+            </div>
+            <div class="input-group-text mb-1" style="white-space: normal">
+                {% if h.formula == 'float' %}
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop">State</span>
+                            <span id="s_{{ h.id|stringformat:'d' }}_state" class="form-control" style="background-color: transparent"></span>
+                        </div>
+                    {% endif %}
+                {% endif %}
+                {% if h.formula == 'bool' %}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop">Fact</span>
+                        {% endif %}
+                        <input type="hidden" value="False" name="chb_{{ h.id|stringformat:'d' }}">
+                        <input type="checkbox" id="chb_{{ h.id|stringformat:'d' }}" name="chb_{{ h.id|stringformat:'d' }}" value="True"
+                        class="form-control obj-prop" style="height: 2rem">
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <input type="hidden" value="False" name="chb_{{ h.id|stringformat:'d' }}_delay">
+                            <input type="checkbox" id="chb_{{ h.id|stringformat:'d' }}_delay" class="form-control obj-prop" style="height: 2rem"
+                                   name="chb_{{ h.id|stringformat:'d' }}_delay" value="True">
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop">delay-date</span>
+                            <input class="form-control obj-prop" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% elif h.formula == 'link'  %}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop" >Fact</span>
+                        {% endif %}
+                        <input class="form-control obj-prop" id="i_link_{{ h.id|stringformat:'d' }}" name="i_link_{{ h.id|stringformat:'d' }}"
+                               oninput="get_link_ajax(this, '{{db_loc}}'), promp_link(this, {{ is_contract }})"
+                               list="dl_{{ h.id|stringformat:'d' }}">
+                        <datalist id="dl_{{ h.id|stringformat:'d' }}"></datalist>
+                        <span class="input-group-text" id="s_link_{{ h.id|stringformat:'d' }}" style="height: 2.25em"></span>
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <input class="form-control obj-prop" id="i_link_{{ h.id|stringformat:'d' }}_delay"
+                                   name="i_link_{{ h.id|stringformat:'d' }}_delay"
+                               oninput="get_link_ajax(this), promp_link(this)" list="dl_{{ h.id|stringformat:'d' }}_delay">
+                            <datalist id="dl_{{ h.id|stringformat:'d' }}_delay"></datalist>
+                            <span class="input-group-text" id="s_link_{{ h.id|stringformat:'d' }}_delay" style="height: 2.25em"></span>
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop">delay-date</span>
+                            <input class="form-control" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% elif h.formula == 'datetime' %}  {# Если Дата-время #}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop" >Fact</span>
+                        {% endif %}
+                        <input class="form-control obj-prop" id="i_datetime_{{ h.id|stringformat:'d' }}" step="1"
+                            name="i_datetime_{{ h.id|stringformat:'d' }}" type="datetime-local">
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <input class="form-control obj-prop obj-prop" id="i_datetime_{{ h.id|stringformat:'d' }}_delay"
+                                name="i_datetime_{{ h.id|stringformat:'d' }}_delay"  type="datetime-local">
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop"
+                                  style="z-index: 5">delay-date</span>
+                            <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% elif h.formula == 'date' %}  {# Если Дата #}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop" >Fact</span>
+                        {% endif %}
+                        <input class="form-control obj-prop" id="i_date_{{ h.id|stringformat:'d' }}"
+                               name="i_date_{{ h.id|stringformat:'d' }}" type="date">
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <input class="form-control obj-prop obj-prop" id="i_date_{{ h.id|stringformat:'d' }}_delay"
+                                type="date" name="i_date_{{ h.id|stringformat:'d' }}_delay">
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop"
+                                  style="z-index: 5">delay-date</span>
+                            <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% elif h.formula == 'float' %} {# Если переменная - число #}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop" >Fact</span>
+                        {% endif %}
+                        <input class="form-control obj-prop" id="i_float_{{ h.id|stringformat:'d' }}"
+                            name="i_float_{{ h.id|stringformat:'d' }}" type="number" step="any"
+                               {% if h.id in lcf and is_contract == 'true' %}
+                                    oninput="reflofi(this, {% if is_contract == 'true' %}true{% else %}false{% endif %})"
+                               {% endif %}
+                        >
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <input class="form-control" style="background-color: transparent"
+                                   id="i_float_{{ h.id|stringformat:'d' }}_sum_delay" readonly>
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop" >new-delay</span>
+                            <input class="form-control obj-prop obj-prop" id="i_float_{{ h.id|stringformat:'d' }}_delay"
+                                   name="i_float_{{ h.id|stringformat:'d' }}_delay" type="number"
+                                   oninput="reflofi(this,{% if h.id in lcf2 %} true{% else %} false{% endif %})">
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop"
+                                  style="z-index: 5">delay-date</span>
+                            <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% elif h.formula == 'enum' %} {# Если переменная - перечисление #}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop" >Fact</span>
+                        {% endif %}
+                        <select class="form-control obj-prop" id="s_enum_{{ h.id|stringformat:'d' }}" name="s_enum_{{ h.id|stringformat:'d' }}">
+                            {% for enum in h.value %}
+                                <option value="{{ enum }}">{{ enum }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <select class="form-control obj-prop" id="s_enum_{{ h.id|stringformat:'d' }}_delay"
+                                    name="s_enum_{{ h.id|stringformat:'d' }}_delay">
+                                {% for enum in h.value %}
+                                    <option value="{{ enum }}">{{ enum }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop"
+                                  style="z-index: 5">delay-date</span>
+                            <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% elif h.formula == 'eval' %}  {# Если формула #}
+                    <div class="position-relative w-100">
+                        <div class="form-control" id="div_formula_{{ h.id|stringformat:'d' }}"></div>
+                    </div>
+                {% elif h.formula == 'const' %} {# Если алиас #}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop" >Fact</span>
+                        {% endif %}
+                        <div class="form-control" id="div_alias_{{ h.id|stringformat:'d' }}" style="height: auto; "></div>
+                        <select class="form-control obj-prop" id="s_alias_{{ h.id|stringformat:'d' }}"
+                            name="s_alias_{{ h.id|stringformat:'d' }}" onchange="recount_alias(this)">
+                            {% for c in h.const %}
+                                <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <div class="form-control" id="div_alias_{{ h.id|stringformat:'d' }}_delay"
+                                 style="height: auto; min-height: 2.25em"></div>
+                            <select class="form-control obj-prop" id="s_alias_{{ h.id|stringformat:'d' }}_delay"
+                            name="s_alias_{{ h.id|stringformat:'d' }}_delay" onchange="recount_alias(this)">
+                                {% for c in h.const %}
+                                    <option value="{{ c.id }}">{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop"
+                                  style="z-index: 5">delay-date</span>
+                            <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% elif h.formula == 'file' %}  {# Если файл #}
+                    <div class="form-control" style="display: initial; padding: 0; height: initial; border: 0;">
+                        <div class="input-group">
+                            {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                                <span class="position-absolute translate-middle badge label-prop" style="left: 30%">Fact</span>
+                            {% endif %}
+                            <div class="custom-file">
+                                <input type="file" class="custom-file-input" id="i_file_{{ h.id|stringformat:'d' }}"
+                                   oninput="change_file_label(this)" name="i_file_{{ h.id|stringformat:'d' }}">
+                                <input class="tag-invis" id="i_filename_{{ h.id|stringformat:'d' }}"
+                                       name="i_filename_{{ h.id|stringformat:'d' }}">
+                                <label class="custom-file-label" style="height: auto;"
+                                       for="i_file_{{ h.id|stringformat:'d' }}"
+                                       id="l_file_{{ h.id|stringformat:'d' }}">Выберите файл</label>
+                                <span class="tag-invis" id="s_filename_{{ h.id|stringformat:'d' }}"></span>
+                            </div>
+                            <button class="btn-outline-primary btn" id="b_show_file_{{ h.id|stringformat:'d' }}"
+                            title="расположение файла" onclick="show_file_location({{ h.id|stringformat:'d' }})"
+                                    type="button">c:</button>
+                            <button class="btn-outline-primary btn" id="b_save_file_{{ h.id|stringformat:'d' }}"
+                            onclick="send_form_with_param('b_save_file', {{ h.id|stringformat:'d' }})"
+                            type="button">Скачать</button>
+                            <button class="btn btn-outline-danger" id="b_del_file_{{ h.id|stringformat:'d' }}"
+                            onclick="open_modal_with_params('b_del_file', {{ h.id|stringformat:'d' }})"
+                            type="button">Удалить</button>
+                        </div>
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <div class="input-group">
+                                <span class="position-absolute badge label-prop-link" data-toggle="popover" style="left: 30%"
+                                title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                                <div class="custom-file">
+                                    <input type="file" class="custom-file-input" id="i_file_{{ h.id|stringformat:'d' }}_delay"
+                                           oninput="change_file_label(this)" name="i_file_{{ h.id|stringformat:'d' }}_delay">
+                                    <input class="tag-invis" id="i_filename_{{ h.id|stringformat:'d' }}_delay"
+                                    name="i_filename_{{ h.id|stringformat:'d' }}_delay">
+                                    <label class="custom-file-label" style="height: auto;"
+                                           for="i_file_{{ h.id|stringformat:'d' }}_delay"
+                                           id="l_file_{{ h.id|stringformat:'d' }}_delay">Выберите файл</label>
+                                    <span class="tag-invis" id="s_filename_{{ h.id|stringformat:'d' }}_delay"></span>
+                                </div>
+                                <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                            </div>
+                        {% endif %}
+                    </div>
+
+                {% else %}
+                    <div class="position-relative w-100">
+                        {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                            <span class="position-absolute translate-middle badge label-prop" >Fact</span>
+                        {% endif %}
+                        <textarea class="form-control obj-prop" name="ta_{{h.id|stringformat:'d' }}" id="ta_{{ h.id|stringformat:'d' }}"
+                          style="min-height: 1rem; height: auto"
+                        {% if is_contract == 'true' and h.delay.handler or is_contract == 'false' and h.delay_settings.handler %}readonly{% endif %}
+                        ></textarea>
+                    </div>
+                    {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
+                        <div class="position-relative w-100">
+                            <span class="position-absolute badge label-prop-link" data-toggle="popover"
+                            title="title" data-content="" id="ss_delays_{{ h.id|stringformat:'d' }}">delay</span>
+                            <textarea class="form-control obj-prop" name="ta_{{h.id|stringformat:'d' }}_delay"
+                              id="ta_{{ h.id|stringformat:'d' }}_delay" style="min-height: 1rem; height: auto"></textarea>
+                        </div>
+                        <div class="position-relative w-100">
+                            <span class="position-absolute translate-middle badge label-prop"
+                                  style="z-index: 5">delay-date</span>
+                            <input class="date4delay" id="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime"
+                                type="datetime-local" name="i_datetime_{{ h.id|stringformat:'d' }}_delay_datetime">
+                        </div>
+                    {% endif %}
+                {% endif %}
+            </div>
+        {% endif %}
+        {# Техпроцессы #}
+        {% include 'contracts/manage_tps.html' %}
+    {% endfor %}
+
+    {# Словари #}
+    {% include 'objects/dict-in-object.html' %}
+    {# Кнопки управления #}
+    {% if request.user.is_staff and is_contract == 'false' or is_contract == 'true' %}
+        <div class="mb-3">
+            <button type="button" class="btn btn-primary" style="background-color: #195fb2;
+            border-color: #195fb2; min-width: 100px" onclick="new_obj()">
+                Новый</button>
+            <button type="button" class="btn btn-primary" style="background-color: #195fb2;
+            border-color: #195fb2; min-width: 100px"
+                    onclick="send_form_with_param('b_save')" id="b_save">
+                Сохранить</button>
+        {% if objects.0.type == 'table' or objects.0.type == 'contract' %}
+            <button type="button" class="btn btn-secondary" onclick="send_form_with_param('b_draft')">
+                В черновик</button>
+        {% endif %}
+            <button type="button" class="btn btn-danger" style="min-width: 100px" id="b_delete_object"
+                    onclick="$('#delete_object_modal').modal('show');" >
+                Удалить</button>
+        </div>
+    {% endif %}
+    {# Модальные окна #}
+    {% include 'objects/modal_windows_objects.html' %}
+</div>

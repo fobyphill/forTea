@@ -1,0 +1,19 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>{% block title %}{% endblock %}</title>
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css">
+        <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+        <link rel="shortcut icon" type="image/png" href="{% static 'img/favicon.png' %}"/>
+        {% block script %}
+        {% endblock %}
+    </head>
+    <body style="background-color: white; margin-top: 10%">
+        <div class="container">
+            {% block body %}
+            {% endblock %}
+        </div>
+    </body>
+</html>

@@ -1,0 +1,149 @@
+{% extends 'partials/../base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    .custom-file-input:lang(en)~.custom-file-label::after {
+        content: "Обзор";
+    }
+    input[type=range]{
+       height: 2px;
+        margin-top: 10px;
+        background-color: #195fb2;
+    }
+    li {
+        list-style-type: none;
+        cursor: pointer;
+    }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+{% endblock %}
+
+{% block content %}
+    <div class="{{ message_class }}" id="div_msg">{{ message|linebreaks }}</div>
+   <div class="card">
+        <form id="form" method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="card-body">
+                <h4><a href="tasks">{{ title }}</a></h4>
+                <div class="filter-block">
+                    <div class="my-inline-blocks">
+                        <label>Адресация</label>
+                        <select id="s_address" name="s_address" class="form-control search-filter"
+                            style="display: inline; padding: 0; width: auto" onchange="this.form.submit()">
+                            <option value="to_me" {% if request.POST.s_address == 'to_me' %}selected{% endif %}>
+                                Мне
+                            </option>
+                            <option value="from_me" {% if request.POST.s_address == 'from_me' %}selected{% endif %}>
+                                От меня
+                            </option>
+                        </select>
+                    </div>
+                    <div class="my-inline-blocks">
+                        <label>Этап</label>
+                        <select id="s_phase" name="s_phase" class="form-control"
+                            style="display: inline; padding: 0; width: auto" onchange="this.form.submit()">
+                            <option value="draft" {% if request.POST.s_phase == 'draft' %}selected{% endif %}>
+                                Не подтвержденные
+                            </option>
+                            <option value="approved" {% if request.POST.s_phase == 'approved' %}selected{% endif %}>
+                                Подтвержденные
+                            </option>
+                        </select>
+                    </div>
+                </div>
+                <table id="task_table" class="table table-responsive-md table_sort" style="width:100%">
+                    <thead>
+                        <tr style="cursor: pointer;" class="row">
+                            <th class="col-1 text-center">Код задачи</th>
+                            <th class="col-1 text-center">Локация</th>
+                            <th class="col-1 text-center">ID класса</th>
+                            <th class="col-1 text-center">Код объекта</th>
+                            <th class="col-2 text-center">Тип</th>
+                            <th class="col text-center">Информация</th>
+                            {% if status != 'done' %}
+                                <th class="col-2 text-center">Действие</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in tasks %}
+                            <tr class="row">
+                                <td class="col-1 text-center">{{ t.code }}</td>
+                                <td class="col-1 text-center">{{ t.loc }}</td>
+                                <td class="col-1 text-center">{{ t.class_id }}</td>
+                                <td class="col-1 text-center">{{ t.parent_code }}</td>
+                                <td class="col-2 text-center">{{ t.kind }}</td>
+                                <td class="col">
+                                    <div class="">
+                                        {% for r in t.recs %}
+                                            <div class="row">
+                                                <div class="col" {% if r.date_done %}style="background-color: #e9ecef"{% endif %}>
+                                                    {{ r.data }}
+                                                </div>
+                                                {% if 's_address' not in request.POST or request.POST.s_address == 'to_me' %}
+                                                    <div class="col-0-5 text-center">
+                                                        <button style="border: 2px solid #dee2e6; border-radius: 5px; background-color: initial;"
+                                                            {% if r.date_done %}
+                                                                name="b_cancel_stage"
+                                                            {% else %}
+                                                                name="b_approve_stage"
+                                                            {% endif %}
+                                                                value="{{ r.id }}">
+                                                            <img {% if r.date_done %}
+                                                                    src="{% static 'img/cancel_36.png' %}" title="Отменить"
+                                                                 {% else %}
+                                                                     src="{% static 'img/green_tick.png' %}" title="Подтвердить"
+                                                                 {% endif %}
+                                                                    width="15rem" >
+                                                        </button>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                </td>
+{#                                {% if status == 'actual' %}#}
+                                <td class="col-2 text-center">
+                                    {% if t.kind == 'Стадия' %}
+                                        <button class="btn btn-primary" style="background-color: #195fb2; border-color: #195fb2;" name="b_approve" type="submit"
+                                                value="{{ t.code }}">Выполнить</button>
+                                    {% endif %}
+                                    <button class="btn btn-danger" name="b_cancel" value="{{ t.code }}">
+                                        Отклонить</button>
+                                </td>
+{#                                {% elif status == 'cancel' %}#}
+{#                                    <td class="col-2">#}
+{#                                        <button class="btn btn-primary" style="background-color: #195fb2; border-color: #195fb2;"#}
+{#                                                name="b_active" type="submit"#}
+{#                                                value="{{ t.code }}">Активировать</button>#}
+{#                                        <button class="btn btn-danger" name="b_remove" value="{{ t.code }}">#}
+{#                                            Удалить</button>#}
+{#                                    </td>#}
+{#                                {% endif %}#}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {#  Пагинация#}
+                {% if tasks %}
+                    {% include 'partials/../objects/pagination.html' %}
+                {% endif %}
+            </div>
+        </form>
+    </div>
+    {# Подсказки#}
+    <div>
+        <b>Подсказки:</b><br>
+    </div>
+
+{% endblock %}

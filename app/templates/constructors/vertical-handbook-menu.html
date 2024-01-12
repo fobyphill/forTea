@@ -1,0 +1,21 @@
+<nav class="nav flex-column">
+    <a href="/manage-class-tree" class="nav-link{% if request.path == '/manage-class-tree' %} active text-bold{% endif %}">
+        Конструктор справочников
+    </a>
+    {# Дерево справочников #}
+    <div class="nav-item dropdown">
+        <a class="dropdown-toggle nav-link
+            {% if request.path == '/manage-object' %}
+                active text-bold
+            {% endif %}
+        " href="#" data-toggle="dropdown" aria-haspopup="true"
+           aria-expanded="false">
+          Справочники
+        </a>
+        <div class="dropdown-menu" aria-labelledby="shops_dropdown">
+            {{ request.session.class_menu|safe }}
+        </div>
+    </div>
+    {# История#}
+    <a href="/hist-reg" class="nav-link{% if request.path == '/hist-reg' %} active text-bold {% endif %}">История</a>
+</nav>

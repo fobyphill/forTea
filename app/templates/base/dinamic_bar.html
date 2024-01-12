@@ -1,0 +1,20 @@
+{% load static %}
+
+{% with '/manage-class-tree /manage-object /table-draft' as list %}
+    {% if request.path in list.split or request.path == '/tree' and request.GET.location == 't' %}
+        {% include 'constructors/../base/handbook-top-menu.html' %}
+    {% endif %}
+{% endwith %}
+{% with '/manage-contracts /contract /contract-draft' as list %}
+    {% if request.path in list.split or request.path == '/tree' and request.GET.location == 'c' %}
+        {% include 'contracts/../constructors/../base/contract-top-menu.html' %}
+    {% endif %}
+{% endwith %}
+{# Меню для словарей #}
+{% if request.path == '/dictionary' %}
+    {% if parent_type == 'contract' %}
+        {% include 'contracts/../constructors/../base/contract-top-menu.html' %}
+    {% else %}
+        {% include 'constructors/../base/handbook-top-menu.html' %}
+    {% endif %}
+{% endif %}

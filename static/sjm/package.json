@@ -1,0 +1,49 @@
+{
+    "name": "suggestions-jquery",
+    "version": "21.8.0",
+    "description": "DaData.ru Suggestions jQuery plugin",
+    "homepage": "https://github.com/hflabs/suggestions-jquery",
+    "author": {
+        "name": "HFLabs",
+        "url": "https://hflabs.ru/"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/hflabs/suggestions-jquery.git"
+    },
+    "license": "MIT",
+    "peerDependencies": {
+        "jquery": ">= 1.9"
+    },
+    "devDependencies": {
+        "@metahub/karma-jasmine-jquery": "^2.0.1",
+        "gulp": "^4.0.0",
+        "gulp-banner": "^0.1.3",
+        "gulp-clean-css": "^3.0.2",
+        "gulp-if": "^2.0.2",
+        "gulp-less": "^4.0.1",
+        "gulp-line-ending-corrector": "^1.0.1",
+        "gulp-rename": "^1.2.2",
+        "gulp-replace": "^0.5.4",
+        "gulp-rollup": "^2.11.0",
+        "gulp-uglify": "^2.0.0",
+        "jasmine": "^2.5.3",
+        "jasmine-core": "^3.3.0",
+        "jasmine-jquery": "^2.1.1",
+        "jasmine-sinon": "^0.4.0",
+        "karma": "^4.0.1",
+        "karma-chrome-launcher": "^2.2.0",
+        "karma-jasmine": "^2.0.1",
+        "karma-jasmine-html-reporter": "^1.4.0",
+        "karma-jasmine-sinon": "^1.0.4",
+        "karma-jquery": "^0.2.3",
+        "karma-phantomjs-launcher": "^1.0.4",
+        "karma-spec-reporter": "0.0.32",
+        "prettier": "1.18.2",
+        "sinon": "^4.1.5"
+    },
+    "main": "dist/js/jquery.suggestions.js",
+    "scripts": {
+        "test": "gulp test"
+    }
+}

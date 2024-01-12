@@ -1,0 +1,9 @@
+<div>
+    <ul id="ul_tree">
+        {% for ct in request.session.class_tree %}
+            {% with tags=ct|get_children %}
+                {{ tags|safe }}
+            {% endwith %}
+        {% endfor %}
+    </ul>
+</div>
