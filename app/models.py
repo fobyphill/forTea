@@ -40,6 +40,7 @@ class Contracts(models.Model):
     system = models.BooleanField(default=False)
 
 
+# Объекты контрактов
 class ContractCells(models.Model):
     code = models.PositiveIntegerField()
     parent_structure = models.ForeignKey(Contracts, on_delete=models.DO_NOTHING, related_name='table_name')
