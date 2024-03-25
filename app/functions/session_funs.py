@@ -301,7 +301,7 @@ def update_omtd(request):
                 sys_params = []
                 stages = []
                 for mp in my_params:
-                    if mp['settings'] and 'system' in mp['settings']:
+                    if mp['settings']['system']:
                         sys_params.append(mp)
                     else:
                         stages.append(mp)
@@ -313,6 +313,7 @@ def update_omtd(request):
     if not 'temp_object_manager' in request.session or not request.session['temp_object_manager']:
         fill_omdt()
     elif 'class_id' in request.session['temp_object_manager']:
+
         if request.session['temp_object_manager']['class_id'] != int(request.GET['class_id']):
             fill_omdt()
         elif request.session['temp_object_manager']['path'] != request.path \

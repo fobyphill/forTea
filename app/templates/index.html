@@ -1,7 +1,12 @@
 {% extends 'base/base.html' %}
 {% load my_filters %}
+{% load static %}
 {% block title %}
     {{ title }}
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/index.js' %}"></script>
 {% endblock %}
 
 {% block content %}

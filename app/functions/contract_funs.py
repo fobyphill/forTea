@@ -335,7 +335,7 @@ def dcsp(contract_id, code, headers, user_id, dict_object, dict_edit_object, tim
     # 1. отработаем бизнес-правило
     biz_rule = next(sp for sp in system_params if sp['name'] == 'business_rule')
     old_obj = ContractCells.objects.filter(parent_structure_id=contract_id, code=code)
-    tps = params['tps'] if "tps" in params else None
+    # tps = params['tps'] if "tps" in params else None
     presaved_object = app.functions.interface_procedures.mofr(code, contract_id, headers, dict_object, old_obj, True)
     if not do_business_rule(biz_rule, presaved_object, user_id):
         return 'Ошибка. Не выполняется бизнес-правило контракта<br>'

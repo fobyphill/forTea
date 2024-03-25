@@ -2,7 +2,11 @@
 <footer class="main-footer" >
     <strong>Copyright &copy; {% now "Y" %} <a href='http://shop.f-trade.ru'>f-trade.ru</a>.</strong>
     Все права защищены.
-    <a href="{% static 'manuals/manual.pdf' %}">Инструкция</a>
+    {% if user.id %}
+        <a href="{% static 'manuals/manual.pdf' %}">Инструкция</a>
+    {% else %}
+        <a href="login">Войти</a>
+    {% endif %}
 </footer>
 
 <!--style="position: relative"-->

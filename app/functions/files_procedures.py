@@ -11,7 +11,10 @@ def get_file_path(filename, class_id, **params):
         location += class_id
         date_save = filename[4:8] + '-' + filename[2:4] + '-' + filename[:2]
         path = 'database_files_'
-        path += 'history' if not is_draft else 'drafts'
+        if is_draft:
+            path += 'drafts'
+        else:
+            path = 'static/' + path + 'history'
         return path + '/' + location + '/' + date_save + '/' + filename
     else:
         return ''

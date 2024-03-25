@@ -60,8 +60,8 @@ function promp_link(this_input, is_contract=false) {
     typingTimer = setTimeout(() =>{
         let link = this_input.value
         let header_id = this_input.id.match(/i_link_(\d+)/)[1]
-        let text_delay = (this_input.id.slice(this_input.id.length - 5) === 'delay') ? '_delay' : ''
-        let result = $('#dl_' + header_id + text_delay)[0]
+        // let text_delay = (this_input.id.slice(this_input.id.length - 5) === 'delay') ? '_delay' : ''
+        let result = $('#' + this_input.getAttribute('list'))[0]
         $.ajax({url:'promp-link',
             method:'get',
             dataType:'json',

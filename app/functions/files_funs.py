@@ -6,24 +6,13 @@ import shutil
 from datetime import datetime
 
 
-def handle_uploaded_file(f, *list_dir):
-    # проверка папок
-    dir = ''
-    for ld in list_dir:
-        dir = os.path.join(dir, ld)
-        if not os.path.exists(dir):
-            os.mkdir(dir)
-    with open(os.path.join(dir, f.name), 'wb+') as destination:
-        for chunk in f.chunks():
-            destination.write(chunk)
-
 # Удаление файла
 # Вход: класс айди - строка, name_file - название файла, kwargs: folder - расположение файла - contract или table
 def delete_file(class_id, file_name, **kwargs):
     general_folder = 'database_files_history'
     class_folder = kwargs['folder'] + '_' + str(class_id)
     date_folder = file_name[4:8] + '-' + file_name[2:4] + '-' + file_name[:2]
-    current_dir = os.path.join(general_folder, class_folder, date_folder)
+    current_dir = os.path.join('static', general_folder, class_folder, date_folder)
     if os.path.exists(current_dir):
         os.remove(os.path.join(current_dir, file_name))
 
@@ -50,7 +39,7 @@ def cffdth(filename, class_id, **params):
     folder_date = filename[4:8] + '-' + filename[2:4] + '-' + filename[:2]
     draft_path = os.path.join('database_files_draft', location + class_id,
                               folder_date, filename)
-    hist_path = os.path.join('database_files_history', location + class_id,
+    hist_path = os.path.join('static', 'database_files_history', location + class_id,
                                folder_date, filename)
     file_from = hist_path if reverse else draft_path
     file_to = draft_path if reverse else hist_path
@@ -74,7 +63,7 @@ def cffdth(filename, class_id, **params):
 # Выход: result (символ), имя файла, сообщение
 # Расшифровка выходной переменной result:
 # o - ok, m - missing (нет файла для загрузки), e - error(ошибка загрузки), f - format (неподходящий формат файла)
-def upload_file(request, file_key, file_name, is_contract=False, **params):
+def upload_file(request, file_key, file_name, str_class_id, is_contract=False, **params):
     # Опциональные параметры
     root_folder = params['root_folder'] if 'root_folder' in params else 'database_files_history'
     message = ''
@@ -91,10 +80,19 @@ def upload_file(request, file_key, file_name, is_contract=False, **params):
         location = 'contract' if is_contract else 'table'
         file = request.FILES[file_key]
         file_name = datetime.today().strftime('%d%m%Y%H%M%S') + file.name
-        folder_name = location + '_' + request.POST['class_id']
+        folder_name = location + '_' + str_class_id
         file.name = file_name
-        hist_name = (root_folder, folder_name, datetime.today().strftime('%Y-%m-%d'))
-        handle_uploaded_file(file, *hist_name)
+        list_dir = [root_folder, folder_name, datetime.today().strftime('%Y-%m-%d')]
+        dir = ''
+        if list_dir[0] == 'database_files_history':
+            list_dir.insert(0, 'static')
+        for ld in list_dir:
+            dir = os.path.join(dir, ld)
+            if not os.path.exists(dir):
+                os.mkdir(dir)
+        with open(os.path.join(dir, file.name), 'wb+') as destination:
+            for chunk in file.chunks():
+                destination.write(chunk)
         result = 'o'
     else:
         result = 'm'

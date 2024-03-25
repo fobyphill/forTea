@@ -1,4 +1,4 @@
-{% extends 'partials/../base/base.html' %}
+{% extends 'base/base.html' %}
 {% load static %}
 {% load my_filters %}
 {% block title %}
@@ -15,6 +15,7 @@
 
 {% block extra_js %}
     <script src="{% static 'js/catalogs/urls.js' %}"></script>
+    <script src="{% static 'js/objects/const.js' %}"></script>
 {% endblock %}
 
 {% block content %}

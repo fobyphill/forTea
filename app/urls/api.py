@@ -1,6 +1,8 @@
 from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
+
+from app.functions import api_funs2
 from app.views import api
 
 urlpatterns = [
@@ -21,4 +23,6 @@ urlpatterns = [
     path('api/login', api.login, name='api/login'),
     path('api/logout', api.logout, name='api/logout'),
     path('api/remove-object-list', api.remove_object_list, name='remove-object-list'),
+    path('api/get-object-hist', api.get_object_hist, name='get-object-hist'),
+    path('api/upload-file', api_funs2.upload_file, name='upload-file'),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

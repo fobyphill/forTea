@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
 
-from app.models import RegName, DataTypesList, ClassTypesList
+from app.models import RegName, DataTypesList, ClassTypesList, MainPageAddress
 
 
 def initialisation():

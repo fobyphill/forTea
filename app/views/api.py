@@ -1,9 +1,11 @@
 import json
 import re
 from datetime import datetime
+
+from dateutil.relativedelta import relativedelta
 from django.http import HttpResponse
 from django.contrib import auth
-from app.functions import api_funs, view_procedures, api_procedures, convert_procedures
+from app.functions import api_funs, view_procedures, api_procedures, convert_procedures, interface_funs, api_funs2
 
 
 @view_procedures.is_auth
@@ -59,11 +61,17 @@ def edit_object(request):
     if request.user.is_authenticated:
         location = request.GET['location'] if 'location' in request.GET else 'table'
         if 'class_id' in request.GET:
-            class_id = int(request.GET['class_id'])
+            try:
+                class_id = int(request.GET['class_id'])
+            except ValueError:
+                return HttpResponse('Параметр class_id указан некорректно. Задайте целое число в качестве ID класса')
         else:
             return HttpResponse('Не указан обязательный параметр - class_id')
         if 'code' in request.GET and request.GET['code']:
-            code = request.GET['code']
+            try:
+                code = int(request.GET['code'])
+            except ValueError:
+                return HttpResponse('Параметр code указан некорректно. Задайте целое число в качестве кода')
         else:
             return HttpResponse('Не указан обязательный параметр - code')
         params = {}
@@ -72,9 +80,9 @@ def edit_object(request):
                 params[k] = v
         result = api_funs.edit_object(class_id, code, request.user.id, location, 'api', **params)
         if not type(result) is str:
-            rus_loc = {'table': 'Справочники', 'contract': 'Контракты', 'dict': 'Словари'}
+            rus_loc = {'table': 'Справочники', 'contract': 'Контракты', 'dict': 'Словари', 'tp': 'Техпроцессы'}
             result = 'Изменен объект класса. ID класса: ' + request.GET['class_id'] + '. Расположение: ' + rus_loc[location]\
-            + '.<br>Код объекта: ' + str(result[0].code)
+            + '.<br>Код объекта: ' + request.GET['code']
         return HttpResponse(result)
     else:
         return HttpResponse('Вы не авторизованы. Пожалуйста авторизуйтесь')
@@ -82,21 +90,8 @@ def edit_object(request):
 # Получить объект. Три обязательных параметра: class_id, code, location = ['table', 'contract', 'dict']
 @view_procedures.is_auth
 def get_object(request):
-    is_valid = True
-    message = ''
-    # Получим основные параметры
-    if not 'code' in request.GET:
-        is_valid = False
-        message += 'Не указан обязательный параметр - код\n'
-    if not 'class_id' in request.GET:
-        is_valid = False
-        message += 'Не указан обязательный параметр - class_id\n'
+    is_valid, message, class_id, code, location = interface_funs.valid_api_data(request)
     if is_valid:
-        if not 'location' in request.GET:
-            location = 'table'
-        else:   location = request.GET['location']
-        code = int(request.GET['code'])
-        class_id = int(request.GET['class_id'])
         response_data = api_funs.get_object(class_id, code, location)
         return HttpResponse(json.dumps(response_data, ensure_ascii=False), content_type="application/json")
     else:
@@ -311,12 +306,12 @@ def run_eval(request):
 
 def login(request):
     if request.user.is_authenticated:
-        return HttpResponse('ok')
+        return HttpResponse(request.COOKIES['csrftoken'])
     else:
         user = auth.authenticate(username=request.GET['login'], password=request.GET['password'])
         if user:
             auth.login(request, user)
-            return HttpResponse('ok')
+            return HttpResponse(request.COOKIES['csrftoken'])
         else:
             return HttpResponse('Логин и пароль некорректны')
 
@@ -348,3 +343,32 @@ def remove_object_list(request):
                                          forced=forced, timestamp=timestamp, parent_transact=parent_transact)
     return HttpResponse(str(result))
 
+
+@view_procedures.is_auth
+def get_object_hist(request):
+    is_valid, message, class_id, code, location = interface_funs.valid_api_data(request)
+    if 'children' in request.GET:
+        children = False if request.GET['children'] in ('', 'false', 'False', '0') else True
+    else:
+        children = True
+    if 'date_to' in request.GET and request.GET['date_to']:
+        try:
+            date_to = datetime.strptime(request.GET['date_to'], '%Y-%m-%dT%H:%M:%S')
+        except ValueError:
+                is_valid = False
+                message += 'Некорректно указан параметр "date_to". Укажите дату в формате ГГГГ-ММ-ДДТчч:мм:сс<br>'
+    else:
+        date_to = datetime.today()
+    if 'date_from' in request.GET and request.GET['date_from']:
+        try:
+            date_from = datetime.strptime(request.GET['date_from'], '%Y-%m-%dT%H:%M:%S')
+        except ValueError:
+            is_valid = False
+            message += 'Некорректно указан параметр "date_from". Укажите дату в формате ГГГГ-ММ-ДДТчч:мм:сс<br>'
+    elif is_valid:
+        date_from = date_to - relativedelta(months=1)
+    if is_valid:
+        response_data = api_funs2.get_object_hist(class_id, code, date_from, date_to, location=location, children=children)
+    else:
+        response_data = message
+    return HttpResponse(json.dumps(response_data, ensure_ascii=False), content_type="application/json")

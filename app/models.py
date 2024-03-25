@@ -16,7 +16,7 @@ class Designer(models.Model):
     delay = models.BooleanField(null=True)
     system = models.BooleanField(default=False)
 
-# объекты
+
 class Objects(models.Model):
     code = models.PositiveIntegerField()
     parent_structure = models.ForeignKey(Designer, on_delete=models.DO_NOTHING, related_name='table_name')
@@ -40,7 +40,6 @@ class Contracts(models.Model):
     system = models.BooleanField(default=False)
 
 
-# Объекты контрактов
 class ContractCells(models.Model):
     code = models.PositiveIntegerField()
     parent_structure = models.ForeignKey(Contracts, on_delete=models.DO_NOTHING, related_name='table_name')
@@ -163,7 +162,7 @@ class TechProcess(models.Model):
     formula = models.CharField(max_length=50)
     parent_id = models.PositiveIntegerField(null=True)
     value = models.JSONField(null=True)
-    settings = models.JSONField(null=True)
+    settings = models.JSONField(default={'system': False})
 
 
 # Техпроцессы - объекты
@@ -178,6 +177,14 @@ class TechProcessObjects(models.Model):
 class MainPageConst(models.Model):
     name = models.CharField(max_length=50)
     value = models.JSONField(null=True)
+    user_login = models.BooleanField(default=True)
+
+
+# адреса главных страниц
+class MainPageAddress(models.Model):
+    user = models.ForeignKey(auth.models.User, on_delete=models.DO_NOTHING, null=True)
+    address = models.CharField(max_length=50, null=True)
+
 
 
 # Типы данных

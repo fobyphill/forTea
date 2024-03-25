@@ -34,10 +34,12 @@
     <script src="{% static 'codemirror/addon/display/autorefresh.js' %}"></script>
     <script src="{% static 'codemirror/addon/hint/show-hint.js' %}"></script>
     <div class="wrapper">
-        <!-- Navbar -->
-        {% include 'base/navbar.html' %}
-        {# dinamic bar #}
-        {% include 'base/dinamic_bar.html' %}
+        {% if user.id %}
+            <!-- Navbar -->
+            {% include 'base/navbar.html' %}
+            {# dinamic bar #}
+            {% include 'base/dinamic_bar.html' %}
+        {% endif %}
         <!-- Main Sidebar Container -->
         <!-- Content Wrapper. Contains page content -->
         <div class="content-wrapper no-sidebar" style="margin-top: 10px">

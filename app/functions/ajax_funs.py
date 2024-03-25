@@ -1,11 +1,12 @@
 import json, datetime
 import re
 
+from dateutil.relativedelta import relativedelta
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, OuterRef, Subquery
 from django.db.models.fields.json import KeyTextTransform
 from django.http import HttpResponse
-from app.functions import convert_funs, convert_procedures, view_procedures, session_funs
+from app.functions import convert_funs, convert_procedures, view_procedures, session_funs, hist_funs
 from app.models import Objects, Designer, Contracts, ContractCells, Dictionary, RegistratorLog, DictObjects
 
 
@@ -217,6 +218,42 @@ def promp_link(request):
     return HttpResponse(result, content_type="application/json")
 
 
+# Подсказывать непосредственную ссылку
+@view_procedures.is_auth
+@view_procedures.if_error
+def promp_direct_link(request):
+    class_manager = Contracts.objects if request.GET['location'] == 'c' else Designer.objects
+    object_manager = ContractCells.objects if request.GET['location'] == 'c' else Objects.objects
+    class_id = int(request.GET['class_id'])
+
+    col_name = 'system_data' if request.GET['location'] == 'c' else 'Наименование'
+    name_id = class_manager.filter(name=col_name, parent_id=class_id)
+    if not name_id:
+        return HttpResponse('[]', content_type="application/json")
+    name_id = name_id[0]
+    link_objects = object_manager.filter(parent_structure_id=class_id, name_id=name_id.id)
+
+    if request.GET['user_data']:
+        try:
+            obj_code = int(request.GET['user_data'])
+        except ValueError:
+            if request.GET['location'] == 'c':
+                link_objects = link_objects.filter(value__datetime_create__icontains=request.GET['user_data'])
+            else:
+                link_objects = link_objects.filter(value__icontains=request.GET['user_data'])
+        else:
+            link_objects = link_objects.filter(code=obj_code)
+    else:
+        link_objects = link_objects[:10]
+    list_objs = []
+    for lo in link_objects:
+        val = lo.value['datetime_create'] if request.GET['location'] == 'c' else lo.value
+        dict_obj = {'code': lo.code, 'value': val}
+        list_objs.append(dict_obj)
+    result = json.dumps(list_objs, ensure_ascii=False)
+    return HttpResponse(result, content_type="application/json")
+
+
 # Подсказать хозяина для словаря
 @view_procedures.is_auth
 @view_procedures.if_error
@@ -251,110 +288,27 @@ def promp_owner(request):
 def roh(request):
     class_id = int(request.GET['class_id'])
     session_funs.update_omtd(request)
+    tom = request.session['temp_object_manager']
     code = int(request.GET['code'])
     dict_loc = {'c': 'contract', 't': 'table', 'd': 'dict'}
     location = dict_loc[request.GET['location']]
-    just_history = False  # Возвращает истину, если массив данных содержит только данные истории,
-    if request.GET['timeline_from']:
+    if 'timeline_from' in request.GET and request.GET['timeline_from']:
         try:
             date_from = datetime.datetime.strptime(request.GET['timeline_from'], '%Y-%m-%dT%H:%M:%S')
         except ValueError:
             date_from = datetime.datetime.strptime(request.GET['timeline_from'], '%Y-%m-%dT%H:%M')
-    else: date_from = datetime.datetime.today()
-    base_hist = RegistratorLog.objects.filter(reg_name_id__in=(13, 15, 22), json_class=class_id, json__code=code)
-    if location in ('table', 'contract'):
-        base_hist = base_hist.filter(json__location=location)
-    elif location == 'dict':
-        base_hist = base_hist.filter(json__type='dict')
-    q_hist = base_hist.filter(date_update__gte=date_from)
-
-    if request.GET['timeline_to']:
+    else:
+        date_from = datetime.datetime.today()
+    if 'timeline_to' in request.GET and request.GET['timeline_to']:
         try:
             date_to = datetime.datetime.strptime(request.GET['timeline_to'], '%Y-%m-%dT%H:%M:%S') + \
                       datetime.timedelta(seconds=1)
         except ValueError:
             date_to = datetime.datetime.strptime(request.GET['timeline_to'], '%Y-%m-%dT%H:%M') + \
-                datetime.timedelta(seconds=1)
-        q_hist = q_hist.filter(date_update__lte=date_to)
+                      datetime.timedelta(seconds=1)
     else:
-        date_to = datetime.datetime.today()
-    q_hist = list(q_hist.select_related('user').values('date_update', 'user__first_name', 'user__last_name').distinct())
-
-    last_date_object = base_hist.order_by('-date_update')[:1]  # последняя запись в истории данного объекта
-    if last_date_object and last_date_object[0].date_update > date_to:
-        just_history = True
-    # Создадим массив с данными словарей, принадлежащих к данному объекту
-    last_date_dicts = []
-    if location != 'dict':
-        for md in request.session['temp_object_manager']['my_dicts']:
-            # Современное значение словаря
-            list_history_dict_base = RegistratorLog.objects.filter(json__type='dict', json__parent_code=code,
-                                                                   json_class=md['id'], json__location=location,
-                                                                   reg_name_id__in=(13, 15))
-            list_history_dict = list_history_dict_base.filter(date_update__gte=date_from, date_update__lte=date_to) \
-            .select_related('user').values('date_update', 'user__first_name', 'user__last_name').distinct()
-            q_hist += [lhd for lhd in list_history_dict if not lhd in q_hist]
-            if not just_history:
-                ldd = list_history_dict_base.order_by('-date_update')[:1]
-                if ldd:
-                    last_date_dicts.append(ldd[0])
-        for ldd in last_date_dicts:
-            if ldd.date_update > date_to:
-                just_history = True
-                break
-
-    # Создадим список с подчиненными массивами
-    last_date_arrays = []
-    if 'arrays' in request.session['temp_object_manager']:
-        for a in request.session['temp_object_manager']['arrays']:
-            owner = next(h for h in a['headers'] if h['name'] == 'Собственник')
-            array_codes = RegistratorLog.objects.filter(reg_name_id=13, json_class=a['id'],
-                                                        json__location=location,
-                                                        json__name=owner['id'], json__value=code)\
-                .annotate(code=KeyTextTransform('code', 'json')).values('code').distinct()
-            array_codes = [ac['code'] for ac in array_codes]
-            list_hist_arr_base = RegistratorLog.objects.filter(reg_name_id__in=(13, 15), json_class=a['id'],
-                                                               json__location=location,
-                                                               json__code__in=array_codes)
-            list_hist_arr = list_hist_arr_base.filter(date_update__gte=date_from, date_update__lte=date_to)\
-            .select_related('user').values('date_update', 'user__first_name', 'user__last_name').distinct()
-            q_hist += [lha for lha in list_hist_arr if not lha in q_hist]
-            if not just_history:
-                lha = list_hist_arr_base.order_by('-date_update')[:1]
-                if lha:
-                    last_date_arrays.append(lha[0])
-        for lda in last_date_arrays:
-            if lda.date_update > date_to:
-                just_history = True
-                break
-
-    # ДОбавим список с техпроцессами
-    last_date_tps = []
-    if 'tps' in request.session['temp_object_manager'] and request.session['temp_object_manager']['tps']:
-        for tp in request.session['temp_object_manager']['tps']:
-            list_hist_tp_base = RegistratorLog.objects.filter(reg_name_id=15, json_class=tp['id'],
-                                                               json__location=location, json__code=code, json__type='tp')
-            lht = list_hist_tp_base.order_by('-date_update')[:1]
-            if lht:
-                if not just_history:
-                    last_date_tps.append(lht[0])
-                list_hist_tp = list_hist_tp_base.filter(date_update__gte=date_from, date_update__lte=date_to) \
-                    .select_related('user').values('date_update', 'user__first_name', 'user__last_name').distinct()
-                q_hist += [lht for lht in list_hist_tp if not lht in q_hist]
-        for ldt in last_date_tps:
-            if ldt.date_update > date_to:
-                just_history = True
-                break
-
-    # Избавимся от нативной даты-времени
-    timeline = []
-    for qh in q_hist:
-        du = datetime.datetime.strftime(qh['date_update'], '%Y-%m-%dT%H:%M:%S')
-        user = qh['user__first_name'] + ' ' + qh['user__last_name']
-        timeline.append({'date_update': du, 'user': user})
-    timeline.sort(key=lambda x: x['date_update'])
-
-    data = {'just_history': just_history, 'timeline': timeline}
+        date_to = date_from - relativedelta(month=1)
+    data = hist_funs.roh(class_id, code, location, date_from, date_to, tom)
     return HttpResponse(json.dumps(data, ensure_ascii=False), content_type="application/json")
 
 

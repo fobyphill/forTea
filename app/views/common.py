@@ -4,8 +4,8 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 
-from app.functions import session_funs, convert_funs, tech_funs
-from app.models import Designer, MainPageConst
+from app.functions import session_funs, convert_funs, tech_funs, convert_funs2
+from app.models import Designer, MainPageConst, MainPageAddress
 
 
 def login_view(request):
@@ -24,14 +24,17 @@ def logout(request):
 
 def index(request):
     if request.user.is_authenticated:
-        main_page_const = list(MainPageConst.objects.all().values())
-        for mpc in main_page_const:
-            convert_funs.deep_formula(mpc, [mpc, ], request.user.id)
-        ctx = {
-            'title': 'Главная страница',
-            'alias': main_page_const,
-        }
-        return render(request, 'index.html', ctx)
+        my_main_page = MainPageAddress.objects.filter(user_id=request.user.id)
+        if my_main_page:
+            return HttpResponseRedirect(my_main_page[0].address)
+        else:
+            main_page_const = list(MainPageConst.objects.filter(user_login=True).values('id', 'name', 'value'))
+            convert_funs2.pati(main_page_const, user_id=request.user.id, main_page=True)
+            ctx = {
+                'title': 'Главная страница',
+                'alias': main_page_const,
+            }
+            return render(request, 'index.html', ctx)
     elif request.method == 'POST':
         user = auth.authenticate(username=request.POST['email'], password=request.POST['password'])
         if user:
@@ -43,4 +46,14 @@ def index(request):
         else:
             return render(request, 'common/login.html', {'message': 'Неверный логин или пароль. Попробуйте еще раз.'})
     else:
-        return HttpResponseRedirect(reverse("login"))
+        # Если зашел неавторизированный юзер - направляем на специальную страницу. По умолчанию - это логин
+        main_page_const = list(MainPageConst.objects.filter(user_login=False).values('id', 'name', 'value'))
+        convert_funs2.pati(main_page_const, main_page=True)
+        if main_page_const:
+            ctx = {
+                'title': 'Главная страница',
+                'alias': main_page_const,
+            }
+            return render(request, 'index.html', ctx)
+        else:
+            return HttpResponseRedirect(reverse('login'))

@@ -14,7 +14,7 @@ from django.urls import reverse
 import app.functions.database_funs
 import app.functions.reg_funs
 from app.functions import convert_funs, common_funs, reg_funs, database_funs, session_funs, database_procedures, \
-    interface_funs, tree_funs, interface_procedures, api_procedures, task_funs
+    interface_funs, tree_funs, interface_procedures, api_procedures, task_funs, convert_funs2, object_funs
 from app.models import Designer, Objects, Dictionary, DictObjects, ContractCells, Contracts, TableDrafts, TechProcess, Tasks
 
 
@@ -156,10 +156,6 @@ def manage_object(request):
                     delete_valid = False
                     message += 'Объекта нет в базе данных. Удаление невозможно<br>'
                 # Проверим, есть ли у объекта незавершенные отложенные значения
-                for od in objects_delete:
-                    if od.delay:
-                        delete_valid = False
-                        message += 'У объекта есть невыполненные отложенные значения. Удаление невозможно<br>'
                 if delete_valid:
                     # Подготовка к удалению
                     # Регистрация
@@ -778,6 +774,7 @@ def manage_class_tree(request):
                             continue
                         else:
                             is_change = False
+                            required_change = False
                             if header.formula == 'tree' and p['name'] == 'is_right_tree':
                                 all_changes = interface_funs.stpirt(cp, p['value'], request.user.id, timestamp)
                             else:
@@ -817,11 +814,16 @@ def manage_class_tree(request):
                                     cp.is_visible = p['visible']
                                     is_change = True
                                 if cp.is_required != p['is_required']:
+                                    # проверка, есть ли дефолт для обязательных полей
+                                    if p['is_required'] and cp.formula not in ('eval', 'enum', 'file', 'bool') and not p['default']:
+                                        is_valid = False
+                                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
                                     # Регистрирую изменение
                                     incoming['is_required'] = cp.is_required
                                     outcoming['is_required'] = p['is_required']
                                     cp.is_required = p['is_required']
                                     is_change = True
+                                    required_change = True
                                 # Работаем с полем "Значение"
                                 # if p['value'] != cp.value:
                                 # тип ссылка или формула
@@ -851,6 +853,7 @@ def manage_class_tree(request):
                                     outcoming['default'] = default
                                     cp.default = default
                                     is_change = True
+
                                 # Delay
                                 if cp.delay != p['delay']:
                                     # Регистрирую изменение
@@ -885,6 +888,10 @@ def manage_class_tree(request):
                                             'json': outcoming,
                                         }
                                         reg_funs.simple_reg(request.user.id, 10, timestamp, transact_id, **reg)
+                                        # Если включился параметр "Обязательный" - то заполним дефолтом все отсутствующие объекты
+                                        if required_change and cp.is_required:
+                                            object_funs.avto(header, 't', cp, transact_id, request.user.id, timestamp)
+
                                     else:
                                         message_class = 'text-red'
                 # Создаем новый параметр
@@ -925,6 +932,10 @@ def manage_class_tree(request):
                             message += 'Некорректно указан ID константы. Новый параметр не сохранен<br>'
                     elif p['type'] == 'enum':
                         p['value'] = p['value'].split('\n')
+                    # Проверка обязательности
+                    if p['is_required'] and p['type'] not in ('file', 'enum', 'eval', 'bool') and not p['default']:
+                        is_valid = False
+                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
                     # Если все проверки пройдены - создаем параметр
                     if is_valid:
                         # зададим приоритет
@@ -953,26 +964,6 @@ def manage_class_tree(request):
                         message += 'Создан новый параметр класса \"' + request.POST['i_name'] + '\"<br>'
                         all_changes = True
                         request.session['temp_object_manager'] = {}
-                        # Если параметр обязательный - то проставим всем ранее созданным записям значение по умолчанию
-                        if bool(p['is_required']) and p['type'] != 'file':
-                            object_codes = [o['code'] for o in Objects.objects\
-                                .filter(parent_structure_id=new_field.parent_id).values('code').distinct()]
-                            new_params = []
-                            for oc in object_codes:
-                                new_params.append(Objects(code=oc, parent_structure_id=new_field.parent_id,
-                                                          name_id=new_field.id, value=p['default']))
-                            Objects.objects.bulk_create(new_params)
-                            # Регистрация создания реквизитов объекта
-                            outcoming = {'class_id': header.id, 'location': 'table', 'type': header.formula}
-                            params = Objects.objects.filter(parent_structure_id=new_field.parent_id, name_id=new_field.id)
-                            for p in params:
-                                json_out = outcoming.copy()
-                                p = model_to_dict(p)
-                                del p['parent_structure']
-                                json_out.update(p)
-                                reg = {'json': json_out, 'json_str': ''}
-                                transact_object = reg_funs.get_transact_id(header.id, p['code'])
-                                reg_funs.simple_reg(request.user.id, 13, timestamp, transact_object, transact_id, **reg)
                         # Регистрация
                         dict_field = {
                             'id': new_field.id, 'name': new_field.name, 'formula': new_field.formula,
@@ -980,11 +971,12 @@ def manage_class_tree(request):
                             'is_visible': new_field.is_visible, 'delay': new_field.delay, 'delay_settings': delay_settings}
                         outcome = {'class_id': header.id, 'location': 'table', 'type': header.formula}
                         outcome.update(dict_field)
-                        reg = {
-                            'json': outcome,
-                        }
+                        reg = { 'json': outcome}
                         reg_funs.simple_reg(request.user.id, 9, timestamp, transact_id, **reg)
                         request.session['temp_object_manager'] = {} #  обнулим временные данные объекта
+                        # Если параметр обязательный - то проставим всем ранее созданным записям значение по умолчанию
+                        if p['is_required']:
+                            object_funs.avto(header, 't', new_field, transact_id, request.user.id, timestamp)
                     else:   message_class = 'text-red'
                 if all_changes:
                     request.session['temp_object_manager'] = {}
@@ -1122,6 +1114,9 @@ def manage_class_tree(request):
 
         # Если указан айди товара - выводим его свойства
         current_class = None
+        properties = None
+        list_formula_exclude = ('table', 'dict')
+        list_name_exclude = ('parent_branch', 'parent')
         if 'i_id' in request.POST and request.POST['i_id']:
             class_id = int(request.POST['i_id'])
             if 'i_type' in request.POST and request.POST['i_type'] == 'Словарь' or 'is_dict' in request.POST:
@@ -1132,12 +1127,17 @@ def manage_class_tree(request):
                 current_class = properties_manager.get(id=class_id)
             except ObjectDoesNotExist:
                 pass
-            list_formula_exclude = ('table', 'dict')
-            list_name_exclude = ('parent_branch', 'parent')
             properties = list(properties_manager.filter(parent_id=class_id)
                               .exclude(formula__in=list_formula_exclude).exclude(name__in=list_name_exclude)
                               .order_by('priority', 'id').values())
-        else:   properties = None
+        # Если не указан айди объекта, то проверим систему. Если в системе нет ни одной папки,
+        # то укажем свойства первого справочника или алиаса из списка
+        elif not len(Designer.objects.filter(formula='folder')):
+            class_tree = request.session['class_tree']
+            if class_tree:
+                properties = list(Designer.objects.filter(parent_id=class_tree[0]['id'])
+                                  .exclude(formula__in=list_formula_exclude).exclude(name__in=list_name_exclude)
+                                  .order_by('priority', 'id').values())
 
         session_funs.crqd(request)  # контрольный пересчет количества черновиков
 
@@ -1167,8 +1167,7 @@ def view_alias(request):
     class_id = int(request.GET['class_id'])
     header = Designer.objects.get(id=class_id)
     alias = list(Designer.objects.filter(parent_id=class_id).values())
-    for a in alias:
-        convert_funs.deep_formula(a, [a, ], request.user.id)
+    convert_funs2.pati(alias, user_id=request.user.id)
     ctx = {
         'title': 'Константа "' + header.name + '"',
         'alias': alias,

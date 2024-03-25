@@ -32,7 +32,7 @@ function fill_object_form(is_contract=false, is_draft=false) {
     div_wrapper_dicts.html('')
     for (let k in json_object){
         // Заполним собственника, если он есть
-        if ('parent_code' in json_object){
+        if (k === 'parent_code'){
             let owner = $('#i_owner')
             owner.val(json_object.parent_code)
             ajax_link_def($('#parent_id').val(), owner.val(), $('#parent_type').val(), $('#s_owner')[0])
@@ -52,48 +52,6 @@ function fill_object_form(is_contract=false, is_draft=false) {
         else if (typeof json_object[k] === 'object' && json_object[k] && Object.keys(json_object[k]).includes('headers')){
             fill_arrays(json_object[k].objects, k)
         }
-        // заполним техпроцессы
-        else if (k === 'tps'){
-            // Обнулим ТПСы
-            let tps = JSON.parse($('#tps2').text())
-            for (let i = 0; i < tps.length; i++){
-                let vals = $('input[id^="i_stage_' + tps[i].id + '_"]')
-                vals.val('')
-                let cf_val = (json_object[tps[i].control_field].value) ? json_object[tps[i].control_field].value : 0
-                let cf_delay = json_object[tps[i].control_field].delay
-                cf_delay = (cf_delay) ? json_object[tps[i].control_field].delay.reduce((acum, obj) => acum = obj.value, 0) : 0
-                vals[0].value = cf_val + cf_delay
-                let fact_dels = $('span[id^="s_stage_' + tps[i].id + '_"]')
-                fact_dels.text('')
-                fact_dels[0].innerText = json_object[tps[i].control_field].value
-            }
-            // Если данные прибыли - работаем с ними
-            let data = json_object[k]
-            if (data.length){
-                for (let i = 0; i < data.length; i++){
-                    for (let j = 0; j < data[i].stages.length; j++){
-                        let stage_data = data[i].stages[j].value
-                        if (stage_data){
-                            let fact = stage_data.fact
-                            if (!fact) fact = 0
-                            let delay = stage_data.delay
-                            if (!delay) delay = 0
-                            else {
-                                let sum = 0
-                                for (let k = 0; k < delay.length; k++){
-                                    sum += delay[k].value
-                                }
-                                delay = sum
-                            }
-                            let stage = delay + fact
-                            $('#i_stage_' + data[i].id + '_' + j).val((stage) ? stage : '')
-                            $('#s_stage_' + data[i].id + '_' + j + '_fact').text((fact) ? fact : '')
-                            $('#s_stage_' + data[i].id + '_' + j + '_delay').text((delay) ? delay : '')
-                        }
-                    }
-                }
-            }
-        }
         // заполним новые техпроцессы
         else if (k === 'new_tps'){
             // Обнулим ТПСы
@@ -102,9 +60,6 @@ function fill_object_form(is_contract=false, is_draft=false) {
                 let current_tp = json_object.new_tps[i]
                 let cf_val = (current_tp.control_field in json_object && json_object[current_tp.control_field].value) ?
                     json_object[current_tp.control_field].value : 0
-                // let cf_delay = (current_tp.control_field in json_object && json_object[current_tp.control_field].delay) ?
-                //     json_object[current_tp.control_field].delay : 0
-                // cf_delay = (cf_delay) ? json_object[current_tp.control_field].delay.reduce((acum, obj) => acum = obj.value, 0) : 0
                 let stage_0 = tps[i].stages[0]
                 let vals = $('#i_stage_' + stage_0.id + '')
                 vals.val('')
@@ -135,6 +90,7 @@ function fill_object_form(is_contract=false, is_draft=false) {
                             $('#i_stage_' + data[i].stages[j].id).val((stage) ? stage : '')
                             $('#s_stage_' + data[i].stages[j].id + '_fact').text((fact) ? fact : '')
                             $('#s_stage_' + data[i].stages[j].id + '_delay').text((delay) ? delay : '')
+                            $('#s_stage_' + data[i].stages[j].id + '_start_delay').text((delay) ? delay : '')
                         }
                     }
                 }
@@ -464,6 +420,8 @@ function fill_object_form(is_contract=false, is_draft=false) {
                 $('#ta_' + header.id + '_delay').val(delay)
         }
     }
+    let dict_type_prefix = {'float': '#i_float_', 'string': '#ta_', 'link': '#i_link_', 'bool': '#chb_',
+        'date': '#i_date_', 'datetime': '#i_datetime_', 'enum': '#s_enum_', 'const': '#s_alias_', 'file': '#i_file_'}
     if (!form_control_init){
         form_control_init = true
         for (let i = 0; i < headers.length; i++){
@@ -479,45 +437,28 @@ function fill_object_form(is_contract=false, is_draft=false) {
             }
             else is_delay = header.delay
             let my_style
-            switch (header.formula){
-                case 'float':
-                    $('#i_float_' + header.id).attr('readonly', is_delay && handler)
-                    break
-                case 'string':
-                    $('#ta_' + header.id).attr('readonly', is_delay && handler)
-                    break
-                case 'link':
-                    $('#i_link_' + header.id).attr('readonly', is_delay && handler)
-                    break
-                case 'bool':
-                    let chb = $('#chb_' + header.id)
-                    if (is_delay && handler)
-                        chb.attr('onclick', 'return false')
-                    else chb.attr('onclick', '')
-                    break
-                case 'date':
-                    $('#i_date_' + header.id).attr('readonly', is_delay && handler)
-                    break
-                case 'datetime':
-                    let rodt = (header.name === 'Дата и время записи' && is_contract) ? true : is_delay && handler
-                    $('#i_datetime_' + header.id).attr('readonly', rodt)
-                    break
-                case 'enum':
-                    my_style = (is_delay && handler) ? 'pointer-events: none; background-color: #e9ecef' : ''
-                    $('#s_enum_' + header.id).attr('style', my_style)
-                    break
-                case 'const':
-                    my_style = (is_delay && handler) ? 'pointer-events: none; background-color: #e9ecef' : ''
-                    $('#s_alias_' + header.id).attr('style', my_style)
-                    break
-                case 'file':
-                    let my_file = $('#i_file_' + header.id)
-                    if (is_delay && handler && my_file.length)
-                        my_file.remove()
-                    else if (!my_file.length)
-                        cfiff(header.id)
-                    break
+            if (header.formula === 'bool') {
+                let chb = $(dict_type_prefix[header.formula] + header.id)
+                if (is_delay && Boolean(handler))
+                    chb.attr('onclick', 'return false')
+                else chb.attr('onclick', '')
             }
+            else if (header.formula === 'datetime'){
+                let rodt = (header.name === 'system_data' && is_contract) ? true : is_delay && Boolean(handler)
+                $(dict_type_prefix[header.formula] + header.id).attr('readonly', rodt)
+                }
+            else if (['enum', 'const'].includes(header.formula)){
+                my_style = (is_delay && Boolean(handler)) ? 'pointer-events: none; background-color: #e9ecef' : ''
+                $(dict_type_prefix[header.formula] + header.id).attr('style', my_style)
+                }
+            else if (header.formula === 'file'){
+                let my_file = $(dict_type_prefix[header.formula] + header.id)
+                if (is_delay && Boolean(handler) && Boolean(my_file.length))
+                    my_file.remove()
+                else if (!my_file.length)
+                    cfiff(header.id)
+                }
+            else $(dict_type_prefix[header.formula] + header.id).attr('readonly', is_delay && Boolean(handler))
         }
     }
 }

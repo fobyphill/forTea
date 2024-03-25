@@ -237,6 +237,37 @@ def delete_simple_task(task, timestamp, **params):
     task.delete()
 
 
+# Удаление таска типа Stage. Откат значений на объектах не производится
+def delete_stage_task(task_code, user_id, **params):
+    timestamp = params['timestamp'] if 'timestamp' in params else datetime.today()
+    parent_transact = params['parent_transact'] if 'parent_transact' in params else None
+    transact_id = reg_funs.get_transact_id('task', task_code)
+    list_regs = []
+    # Регистрация удаления таска
+    inc = {'code': task_code}
+    reg_task = {'json_income': inc}
+    dict_del_task = {'user_id': user_id, 'reg_id': 21, 'timestamp': timestamp, 'transact_id': transact_id,
+                     'parent_transact': parent_transact, 'reg': reg_task}
+    list_regs.append(dict_del_task)
+    stages = Tasks.objects.filter(kind='stage', code=task_code)
+    for s in stages:
+        inc_stage = model_to_dict(s)
+        if inc_stage['date_create']:
+            inc_stage['date_create'] = datetime.strftime(inc_stage['date_create'], '%Y-%m-%dT%H:%M:%S')
+        if inc_stage['date_done']:
+            inc_stage['date_done'] = datetime.strftime(inc_stage['date_done'], '%Y-%m-%dT%H:%M:%S')
+        if inc_stage['date_delay']:
+            inc_stage['date_delay'] = datetime.strftime(inc_stage['date_delay'], '%Y-%m-%dT%H:%M:%S')
+        reg_stage = {'json_income': inc_stage}
+        dict_del_stage = {'user_id': user_id, 'reg_id': 19, 'timestamp': timestamp, 'transact_id': transact_id,
+                     'parent_transact': parent_transact, 'reg': reg_stage}
+        list_regs.append(dict_del_stage)
+    stages.delete()
+    reg_funs.paket_reg(list_regs)
+
+
+
+
 # Полное удаление таска с откатом прежних значений на объектах
 def task_full_delete(task_code, timestamp, user_id):
     task_del = Tasks.objects.filter(code=task_code)

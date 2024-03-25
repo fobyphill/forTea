@@ -2,6 +2,8 @@ import copy
 import json
 import math
 import operator
+import re
+
 import plotly.graph_objects as go
 import networkx as nx
 from datetime import datetime
@@ -17,7 +19,7 @@ from django.shortcuts import render
 from django.urls import reverse
 from app.functions import session_funs, reg_funs, database_funs, convert_funs, common_funs, database_procedures, \
     interface_funs, tree_funs, interface_procedures, convert_funs2, contract_funs, view_procedures, api_procedures, \
-    task_funs
+    task_funs, object_funs
 from app.models import Contracts, ContractCells, Dictionary, DictObjects, Designer, ContractDrafts, Tasks, TechProcess, \
     TechProcessObjects
 
@@ -257,7 +259,7 @@ def manage_contracts(request):
                         TechProcess(name='link_map', formula='eval', parent_id=new_unit.id, settings={'system': True}).save()
                         TechProcess(name='trigger', formula='eval', parent_id=new_unit.id, settings={'system': True}).save()
                         first_stage_val = {'handler': None, 'children': []}
-                        first_stage = TechProcess(name='Создан', formula='eval', parent_id=new_unit.id, value=first_stage_val)
+                        first_stage = TechProcess(name='Создан', formula='float', parent_id=new_unit.id, value=first_stage_val)
                         first_stage.save()
                         # СОздадим первые стадии ТПса для всех объектов
                         codes = ContractCells.objects.filter(name_id=control_field,
@@ -583,6 +585,7 @@ def manage_contracts(request):
                             continue
                         else:
                             is_change = False
+                            change_required = False
                             if header.formula == 'tree' and p['name'] == 'is_right_tree':
                                 all_changes = interface_funs.stpirt(cp, p['value'], request.user.id, timestamp)
                             else:
@@ -622,11 +625,18 @@ def manage_contracts(request):
                                     cp.is_visible = p['visible']
                                     is_change = True
                                 if 'is_required' in p and cp.is_required != p['is_required']:
-                                    # Регистрирую изменение
-                                    incoming['is_required'] = cp.is_required
-                                    outcoming['is_required'] = p['is_required']
-                                    cp.is_required = p['is_required']
-                                    is_change = True
+                                    # проверка, есть ли дефолт для обязательных полей
+                                    if p['is_required'] and cp.formula not in ('eval', 'enum', 'file', 'bool') and not \
+                                    p['default']:
+                                        is_valid = False
+                                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
+                                    else:
+                                        # Регистрирую изменение
+                                        incoming['is_required'] = cp.is_required
+                                        outcoming['is_required'] = p['is_required']
+                                        cp.is_required = p['is_required']
+                                        is_change = True
+                                        change_required = True
                                 # Работаем с полем "Значение"
                                 # тип ссылка или формула
                                 if p['type'] in ['eval', 'enum']:
@@ -675,8 +685,8 @@ def manage_contracts(request):
                                     incoming['delay'] = cp.delay
                                     outcoming['delay'] = p['delay']
                                     cp.delay = p['delay']
-                                if is_change:
-                                    if is_valid:
+                                if is_valid:
+                                    if is_change:
                                         all_changes = True
                                         cp.save()
                                         if not transact_id:
@@ -690,8 +700,10 @@ def manage_contracts(request):
                                             'json': outcoming,
                                         }
                                         reg_funs.simple_reg(request.user.id, 10, timestamp, transact_id, **reg)
-                                    else:
-                                        message_class = 'text-red'
+                                        if change_required and cp.is_required:
+                                            object_funs.avto(header, 'c', cp, transact_id, request.user.id, timestamp)
+                                else:
+                                    message_class = 'text-red'
                 if all_changes:
                     request.session['temp_object_manager'] = {}
                 # Создаем новый параметр
@@ -737,6 +749,10 @@ def manage_contracts(request):
                             message += 'Некорректно указан ID константы. Новый параметр не сохранен<br>'
                     if p['type'] == 'enum':
                         p['value'] = p['value'].split('\n')
+                    # Проверка обязательности
+                    if p['is_required'] and p['type'] not in ('file', 'enum', 'eval', 'bool') and not p['default']:
+                        is_valid = False
+                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
                     # Если все проверки пройдены - создаем параметр
                     if is_valid:
                         # зададим приоритет
@@ -765,26 +781,8 @@ def manage_contracts(request):
                             transact_id = reg_funs.get_transact_id(header.id, 0, 'c')
                         reg_funs.simple_reg(request.user.id, 9, timestamp, transact_id, **reg)
                         # Если параметр обязательный - то проставим всем ранее созданным записям значение по умолчанию
-                        if bool(p['is_required']) and p['type'] != 'file':
-                            object_codes = [o['code'] for o in ContractCells.objects\
-                                .filter(parent_structure_id=class_id).values('code').distinct()]
-                            new_params = []
-                            param_val = new_field.value[0] if new_field.formula == 'enum' else new_field.default
-                            for oc in object_codes:
-                                new_params.append(ContractCells(code=oc, parent_structure_id=new_field.parent_id,
-                                                          name_id=new_field.id, value=param_val))
-                            params = ContractCells.objects.bulk_create(new_params)
-                            # Регистрация создания реквизитов объекта
-                            outcoming = {'class_id': header.id, 'location': 'table', 'type': header.formula}
-                            for p in params:
-                                json_out = outcoming.copy()
-                                p = model_to_dict(p)
-                                del p['parent_structure']
-                                json_out.update(p)
-                                reg = {'json': json_out, 'json_str': ''}
-                                transact_code = reg_funs.get_transact_id(new_field.parent_id, p['code'], 'c')
-                                reg_funs.simple_reg(request.user.id, 13, timestamp, transact_code, transact_id, **reg)
-                        request.session['temp_object_manager'] = {}
+                        if p['is_required']:
+                            object_funs.avto(header, 'c', new_field, transact_id, request.user.id, timestamp)
 
                     else:   message_class = 'text-red'
                 if not all_changes: message += 'Контракт не сохранен<br>'
@@ -1081,7 +1079,7 @@ def manage_contracts(request):
                     stages = [s for s in stages if s['id'] != 'new']
                     # Сохранение
                     val = {'handler': new_stage_data['handler'], 'children': new_stage_data['children']}
-                    new_stage_rec = TechProcess(parent_id=class_id, formula='eval', name=new_stage_data['name'], value=val)
+                    new_stage_rec = TechProcess(parent_id=class_id, formula='float', name=new_stage_data['name'], value=val)
                     new_stage_rec.save()
                     # регистрация
                     outc = {'class_id': class_id, 'location': 'contract', 'type': 'tp', 'name': new_stage_data['name'],
@@ -1507,6 +1505,9 @@ def manage_contracts(request):
         except ObjectDoesNotExist:
             current_class = None
 
+        properties = None
+        system_props = None
+        lne = [lne for lne in list_name_exclude if lne != 'parent_branch']
         if current_class:
             if location == 't':  # для техпроцессов
                 business_rule = class_manager.get(parent_id=class_id, name='business_rule')
@@ -1531,14 +1532,18 @@ def manage_contracts(request):
             else:
                 properties = list(class_manager.filter(parent_id=class_id).exclude(formula__in=list_formula_exclude)
                                   .exclude(name__in=list_name_exclude).order_by('priority', 'id').values())
-                lne = [lne for lne in list_name_exclude if lne != 'parent_branch']
                 system_props = list(class_manager.filter(parent_id=class_id, name__in=lne)
                                 .order_by('id').values())
-
-        else:
-            properties = None
-            system_props = None
-
+        # Если не указан айди объекта, то проверим систему. Если в системе нет ни одной папки,
+        # то укажем свойства первого справочника или алиаса из списка
+        elif not len(Contracts.objects.filter(formula='folder')):
+            class_tree = request.session['contract_tree']
+            if class_tree:
+                properties = list(Contracts.objects.filter(parent_id=class_tree[0]['id'])
+                                  .exclude(formula__in=list_formula_exclude).exclude(name__in=list_name_exclude)
+                                  .order_by('priority', 'id').values())
+                system_props = list(Contracts.objects.filter(parent_id=class_tree[0]['id'], name__in=lne)
+                                    .order_by('id').values())
         ctx = {
             'title': 'Дерево контрактов',
             'message': message,
@@ -1885,7 +1890,8 @@ def view_alias(request):
 
     # Загрузить меню справочников
     if not 'contract_menu' in request.session:
-        request.session['contract_menu'] = session_funs.update_contract_menu(request, request.session['contract_tree'])
+        request.session['contract_menu'] = session_funs.update_class_menu(request, request.session['contract_tree'],
+                                                                          request.session['contract_tree'], None, True)
 
     # Загрузим данные черновиков
     if not 'contract_draft_tree' in request.session:
@@ -1896,8 +1902,7 @@ def view_alias(request):
     class_id = int(request.GET['class_id'])
     header = Contracts.objects.get(id=class_id)
     alias = list(Contracts.objects.filter(parent_id=class_id).values())
-    for a in alias:
-        convert_funs.deep_formula(a, [a, ], request.user.id, True)
+    convert_funs2.pati(alias, user_id=request.user.id)
     ctx = {
         'title': 'Константа "' + header.name + '"',
         'alias': alias,

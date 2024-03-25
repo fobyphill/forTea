@@ -69,7 +69,7 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
     if current_class.formula == 'dict':
         if not v:
             return ''
-    elif not header_param['is_required'] and not v:
+    elif not (current_class.formula == 'tp' or header_param['is_required'] or v):
         if param_type in ('v', 'd'):
             return ''
 
@@ -110,7 +110,7 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
             except ValueError:
                 return 'Ошибка. Некорректное значение ссылки. ID параметра: ' + str(k) + '. Значение: ' + v + '\n'
         elif header_param['formula'] == 'bool':
-            if v not in ('True', 'False'):
+            if v.lower() not in ('true', 'talse'):
                 return 'Ошибка. Некорректное значение логического параметра ' + str(k) + ' = ' + v + \
                        '.Укажите значение True или False' + '\n'
         elif header_param['formula'] == 'date':
@@ -128,7 +128,7 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
                     return 'Ошибка. Некорректное значение параметра ' + str(k) + \
                            ' в формате даты-времени. Укажите дату в строковом формате гггг-мм-ддТчч:мм:cc' + '\n'
         elif header_param['formula'] == 'enum':
-            enum = json.loads(header_param['default']) if current_class.formula == 'dict' else header_param['value']
+            enum = header_param['default'] if current_class.formula == 'dict' else header_param['value']
             if v not in enum:
                 return 'Ошибка. Некорректное значение параметра ' + str(k) + \
                        ' в формате перечисления. Значение обязательно должно быть выбрано из списка перечисления. Значение: \'' \
@@ -478,24 +478,25 @@ def validate_delay_date(str_date):
 
 
 # vadefoppa = validate_delay_for_PPA
-def vadefoppa(date_delay, timestamp, current_class, object_params, location, new_delay):
-    if date_delay < timestamp:
+def vadefoppa(new_delay, timestamp, current_class, object_params, location):
+    date_delay = new_delay['date_update']
+    str_timestamp = datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
+    if date_delay < str_timestamp:
+        new_ts = datetime.strptime(date_delay, '%Y-%m-%dT%H:%M')
         if current_class.formula == 'contract':
-            date_create = next(op for op in object_params if op.name__name == 'Дата и время записи')
-            if new_delay['date_update'] < date_create.value:
-                date_delay = datetime.strptime(date_create.value, '%Y-%m-%dT%H:%M:%S')
+            date_create = next(op.value['datetime_create'] for op in object_params if op.name.name == 'system_data')
+            if date_delay < date_create:
+                new_ts = datetime.strptime(date_create, '%Y-%m-%dT%H:%M:%S')
 
         elif current_class.formula == 'array' and location == 'contract':
             parent = next(op for op in object_params if op.name__name == 'Собственник')
             parent_date = ContractCells.objects.get(parent_structure_id=current_class.parent_id, code=parent.value,
-                                                    name__name='Дата и время записи')
-            if new_delay['date_update'] < parent_date.value:
-                date_delay = datetime.strptime(parent_date.value, '%Y-%m-%dT%H:%M:%S')
-        new_delay['date_update'] = datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
-        ts = date_delay
-    else:
-        ts = timestamp
-    return new_delay, ts
+                                                    name__name='system_data')
+            if new_delay['date_update'] < parent_date.value['datetime_create']:
+                new_ts = datetime.strptime(parent_date.value['datetime_create'], '%Y-%m-%dT%H:%M:%S')
+        new_delay['date_update'] = str_timestamp
+        timestamp = new_ts
+    return new_delay, timestamp
 
 
 # delete_object - кверисет - объект

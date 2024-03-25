@@ -42,12 +42,10 @@ def retreive_tags(formula):
         # Если есть опциональные параметры, вырежем их из массива значений
         k = re.sub(r'\{\{.*?\}\}', '', k, re.S)
         # найдем внешнюю ссылку
-        match = re.match(r'^\s*(table|contract)', k)
-        # найдем стадию техпроцесса
-        match_stage = re.match(r'^\s*tp\.(\d+)\.\'(.+)\'(?:\.(fact|delay|state)|)\s*$', k)
+        match = re.match(r'^\s*(table|contract|tp)', k)
 
         if match:
-            sub = re.sub(r'(table|contract)', '', k, re.S)
+            sub = re.sub(r'(table|contract|tp)', '', k, re.S)
             # Найдем внешнюю ссылку из чисел  contract.33.44.55
             if re.match(r'\s*(?:\.\d+)+\s*$', sub, re.S):
                 parts = re.findall(r'\.(\d+)', sub, re.S)
@@ -72,9 +70,6 @@ def retreive_tags(formula):
                         parts.append(match_last[1])
             if parts:
                 parts.insert(0, match[1])
-        elif match_stage:
-            for i in range(1, len(match_stage.groups()) + 1):
-                parts.append(match_stage[i])
         else:
             # найдем элемент / внутреннюю ссылку
             parts = re.findall(r'(\d+)(?:\.|)', k, re.S)
@@ -172,7 +167,7 @@ def cstdt(str_var, type):
             # У словарей в дефолте лежат все данные ссылки. Поэтому если число не распарсилось - забираем второе число из формулы ссылки
                 val = re.match(r'(?:table|contract)\.\d+\.(\d*)', str_var)[1]
         elif type == 'bool':
-            val = True if str_var == 'True' else False
+            val = str_var.lower() == 'true'
         else:
             val = str_var
     else:

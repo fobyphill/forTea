@@ -3,12 +3,15 @@ import operator
 from datetime import datetime, time, date
 from functools import reduce
 
+from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.db.models import F, Value, CharField, Q, Subquery, OuterRef, FloatField, DateTimeField, TextField, Func
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, TruncDate, JSONObject
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.csrf import csrf_exempt
+
 from app.functions import convert_procedures, convert_funs, interface_funs, tree_funs, common_funs, view_procedures, \
     api_funs, session_funs, ajax_funs_2, ajax_funs, database_funs, parse_funs, update_funs, task_funs, api_funs2, \
     convert_funs2
@@ -20,10 +23,17 @@ import pandas as pd
 
 @view_procedures.is_auth_app
 def tests(request):
-    update_funs.run_delays()
-    return HttpResponse('ok')
+    today = datetime.today()
+    past_day = today - relativedelta(weeks=1)
+    goh = api_funs2.get_object_hist(169, 66, today, past_day)
+    return HttpResponse(str(goh))
 
 
 def tests_template(request):
     return render(request, 'common/graph-tests.html')
+
+@csrf_exempt
+def upload_file(request):
+    aaa = 888
+    return HttpResponse('получилось')
 

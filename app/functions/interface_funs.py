@@ -412,7 +412,7 @@ def download_file(request, is_contract=False):
     file_name = request.POST['i_filename_' + id]
     files_date = file_name[4:8] + '-' + file_name[2:4] + '-' + file_name[:2]
     class_folder = 'contract_' if is_contract else 'table_'
-    file = os.path.join('database_files_history', class_folder + request.GET['class_id'], files_date, file_name)
+    file = os.path.join('static', 'database_files_history', class_folder + request.GET['class_id'], files_date, file_name)
     if os.path.exists(file):
         return get_file(file)
     else:
@@ -457,14 +457,14 @@ def make_graft(request, code, is_contract=False):
     draft = {'parent_structure': class_id, 'code': code, 'branch': None}
     # Если черновик контракта, то создадим пустое поле "Дата и время записи"
     if is_contract:
-        datetime_record_head = Contracts.objects.get(parent_id=class_id, name='Дата и время записи')
+        datetime_record_head = Contracts.objects.get(parent_id=class_id, name='system_data')
         if code:
             datetime_record = ContractCells.objects.filter(parent_structure_id=class_id, code=code,
-                                                           name__id=datetime_record_head.id).get()
+                                                           name__name=datetime_record_head.id).get()
             val = datetime_record.value
         else:
             val = None
-        draft[datetime_record_head.id] = {'value': val}
+        draft[datetime_record_head.name_id] = {'value': val}
     if 'i_branch' in request.POST and request.POST['i_branch']:
         draft['branch'] = int(request.POST['i_branch'])
     for k, v in request.POST.items():
@@ -488,7 +488,7 @@ def make_graft(request, code, is_contract=False):
             draft[field_id] = {'value': interface_procedures.convert_draft_dict(k, v)}
     # Загрузим файлы в черновик
     for k, v in request.FILES.items():
-        res, filename, msg = upload_file(request, k, v, is_contract, root_folder='database_files_draft')
+        res, filename, msg = upload_file(request, k, v, request.POST['class_id'], is_contract, root_folder='database_files_draft')
         if res == 'o':
             draft[int(k[7:])] = {'value': filename}
         else:
@@ -548,7 +548,8 @@ def draft_edit(request, draft_id, is_contract=False):
                 if re.match(r'i_filename', k):
                     # загрузим файл на сервер
                     file_key = 'i_file_' + str(field_id)
-                    res, val, msg = upload_file(request, file_key, v, is_contract, root_folder='database_files_draft')
+                    res, val, msg = upload_file(request, file_key, v, request.POST['class_id'], is_contract,
+                                                root_folder='database_files_draft')
                     if res == 'o':
                         # физически удалим старый файл
                         if old_val:
@@ -748,7 +749,7 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                             # Если тип данных файл - попробуем загрузить его
                             if re.match(r'i_filename_\d+$', k):
                                 if v:
-                                    res, v, msg = upload_file(request, 'i_file_' + str(field_id), v)
+                                    res, v, msg = upload_file(request, 'i_file_' + str(field_id), v, request.POST['class_id'])
                                     if res == 'f':
                                         message += msg
                                         message_class = 'text-red'
@@ -769,7 +770,8 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                                 except KeyError:
                                     continue
                                 if v_file:
-                                    res, delay_value, msg = upload_file(request, 'i_file_' + str(field_id) + '_delay', v_file)
+                                    res, delay_value, msg = upload_file(request, 'i_file_' + str(field_id) + '_delay',
+                                                                        v_file, request.POST['class_id'])
                                     if res == 'f':
                                         message += msg
                                         message_class = 'text-red'
@@ -922,7 +924,7 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                     if v:
                         # Если реквизит типа "файл" - предварительно загрузим его
                         if re.match(r'^i_filename_.\d+$', k):
-                            res, v, msg = upload_file(request, 'i_file_' + str(field_id), v)
+                            res, v, msg = upload_file(request, 'i_file_' + str(field_id), v, request.POST['class_id'])
                             if res == 'f':
                                 message += msg
                                 message_class = 'text-red'
@@ -941,7 +943,8 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                             except KeyError:
                                 continue
                             if v_file:
-                                res, delay_value, msg = upload_file(request, 'i_file_' + str(field_id) + '_delay', v_file)
+                                res, delay_value, msg = upload_file(request, 'i_file_' + str(field_id) + '_delay',
+                                                                    v_file, request.POST['class_id'])
                                 if res == 'f':
                                     message += msg
                                     message_class = 'text-red'
@@ -1110,121 +1113,12 @@ def save_contract_object(request, code, current_class, class_params, **params):
     control_fields = [t['cf'] for t in tps]
     system_data_id = next(cp['id'] for cp in class_params if cp['name'] == 'system_data') if current_class.formula == 'contract' else None
 
-    # Техпроцессы. Валидация, проверка изменений
-    def check_changes_tps():
-        tps_all = {}
-        message = ''
-        tps_chng = False
-        tps_valid = True
-        def make_stages(list_stage):
-            output_dict = {}
-            for ls in list_stage:
-                val = {'fact': 0, 'delay': []}
-                output_dict[ls] = val
-            return output_dict
-        for tp in tps:
-            dictp = {}
-
-            # Формируем старые стадии
-            if code:
-                old_stages = list(TechProcessObjects.objects.filter(parent_structure_id=tp['id'], parent_code=code)
-                                  .values('name_id', 'value'))
-                old_stages_dict = {}
-                old_stages_ids = []
-                if old_stages:
-                    for os in old_stages:
-                        old_stages_dict[os['name_id']] = os['value']
-                        old_stages_ids.append(os['name_id'])
-                else:
-                    # Если по какой-то причине потеряны данные о техпроцессе - заполним его так: первая стадия = КП. Остальные пустые
-                    first_stage = tp['stages'][0]
-                    try:
-                        cf_old = ContractCells.objects.get(parent_structure_id=current_class.id, code=code,
-                                                           name_id=tp['cf'])
-                    except ObjectDoesNotExist:
-                        cf_old_val = 0
-                    else:
-                        cf_old_val = cf_old.value
-                    old_stages_dict[first_stage['id']] = {'fact': cf_old_val, 'delay': []}
-                    old_stages_ids.append(first_stage['id'])
-                absent_stages = [s['id'] for s in tp['stages'] if s['id'] not in old_stages_ids]
-                old_stages_dict.update(make_stages(absent_stages))
-            else:
-                old_stages_dict = make_stages([s['id'] for s in tp['stages']])
-            dictp['old_stages'] = old_stages_dict
-            # формируем новые стадии
-            new_stages = {}
-            stages_ids = ['i_stage_' + str(s['id']) for s in tp['stages']]
-            for k, v in request.POST.items():
-                if k in stages_ids:
-                    new_stages[int(k[8:])] = {'value': float(v) if v else 0}
-            dictp['new_stages'] = new_stages
-            dictp['changed'] = False
-            for k, old_v in dictp['old_stages'].items():
-                old_value = old_v['fact'] + sum([od['value'] for od in old_v['delay']])
-                if old_value != dictp['new_stages'][k]['value']:
-                    dictp['changed'] = True
-                    tps_chng = True
-                    dictp['new_stages'][k]['delta'] = dictp['new_stages'][k]['value'] - old_value
-                else:
-                    dictp['new_stages'][k]['delta'] = 0
-
-            tps_all[tp['id']] = dictp
-            # Вычисляем базовое ТП - все стадии = КП
-            if dictp['changed']:
-                cf_key = 'i_float_' + str(tp['cf'])
-                cf_fact = float(request.POST[cf_key]) if request.POST[cf_key] else 0
-                # cf_ddt_key = 'i_datetime_' + str(tp['cf']) + '_delay_datetime'
-                # if cf_ddt_key in request.POST and request.POST[cf_ddt_key] and request.POST[cf_key + + '_delay']:
-                #     cf_delay = float(request.POST[cf_key + '_delay'])
-                # else:
-                #     cf_delay = 0
-                # cf_val = cf_fact + cf_delay
-                if cf_fact != sum([v['value'] for v in dictp['new_stages'].values()]):
-                    tps_valid = False
-                    message += 'Изменения в техпроцессе ' + str(tp['id']) + \
-                               ' некорректны. Сумма всех этапов должна рваняться контрольному полю<br>'
-                else:
-                # Калькулятор маршрутизации
-                    is_first_stage = True
-                    cf_old_val = sum(ov['fact'] + sum(d['value'] for d in ov['delay']) for ov in dictp['old_stages'].values())
-                    cf_delta = cf_fact - cf_old_val
-                    dictp['cf_delta'] = cf_delta
-                    for k, v in dictp['new_stages'].items():
-                        if is_first_stage:
-                            is_first_stage = False
-                            if cf_delta:
-                                v['valid_delta'] = True
-                                v['delta'] -= cf_delta
-                                continue
-                        if not v['delta'] or ('valid_delta' in v and v['valid_delta']):
-                            v['valid_delta'] = True
-                            continue
-                        if v['delta'] < 0:
-                            partners = next(s['value']['children'] for s in tp['stages'] if s['id'] == k)
-                        else:
-                            partners = [s['id'] for s in tp['stages'] if k in s['value']['children']]
-                        partners_deltas = sum(dictp['new_stages'][p]['delta'] for p in partners)
-                        if partners_deltas * -1 == v['delta']:
-                            v['valid_delta'] = True
-                            for p in partners:
-                                dictp['new_stages'][p]['valid_delta'] = True
-                        else:
-                            dictp['new_stages'][k]['valid_delta'] = False
-                    all_delta_valid = True
-                    for v in dictp['new_stages'].values():
-                        all_delta_valid = all_delta_valid and v['valid_delta']
-                    if not all_delta_valid:
-                        tps_valid = False
-                        message += 'Изменения в техпроцессе ' + str(tp['id']) + ' некорректны. Имеются нарушения целостности данных<br>'
-        return tps_all, tps_chng, tps_valid, message
-
     # редактируем
     if request.POST['i_code']:
         if is_valid:
             objects = ContractCells.objects.filter(code=code, parent_structure_id=current_class.id).select_related('name')
             is_valid, message = contract_validation(class_params, current_class, request, objects)
-            tps_all, change_tps, tps_valid, msg = check_changes_tps()
+            tps_all, change_tps, tps_valid, msg = interface_procedures.check_changes_tps(tps, code, request.POST)
             is_valid = is_valid and tps_valid
 
             if msg:
@@ -1275,14 +1169,12 @@ def save_contract_object(request, code, current_class, class_params, **params):
                             continue
                         current_param = next(cp for cp in class_params if cp['id'] == field_id)
                         json_object = {}
-                        is_handler = current_param['delay'] and 'handler' in current_param['delay'] \
-                                             and current_param['delay']['handler']
-                        if o.value != v and not is_handler:
+                        if o.value != v:
                             is_change = True
                             # Если тип данных файл, сравним имена файлов, а затем попробуем загрузить его
                             if re.match(r'^i_filename_.\d+$', k):
-                                res, v, msg = app.functions.files_funs.upload_file(request, 'i_file_'
-                                                                                   + str(field_id), v, True)
+                                res, v, msg = app.functions.files_funs\
+                                    .upload_file(request, 'i_file_' + str(field_id), request.POST['class_id'], v, True)
                                 if res == 'f':
                                     message += msg
                                     message_class = 'text-red'
@@ -1290,7 +1182,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                             old_value = o.value
                             o.value = v
                             # добавим в словарь редактирования не новое значение, а дельту
-                            if type(v) in (float, int):
+                            if current_param['formula'] == 'float':
                                 if not old_value:    old_value = 0
                                 edit_dict[k] = v - old_value
                             json_object['old_value'] = old_value
@@ -1305,7 +1197,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                                     continue
                                 if v_file:
                                     res, delay_value, msg = upload_file(request, 'i_file_' + str(field_id) + '_delay',
-                                                                        v_file)
+                                                                        v_file, request.POST['class_id'])
                                     if res == 'f':
                                         message += msg
                                         message_class = 'text-red'
@@ -1344,6 +1236,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                                                      objects, request.user.id, True)
                                         if valid_delay:
                                             new_delay['approve'] = True
+
                                 if valid_delay:
                                     if o.delay:
                                         json_object['old_delay'] = o.delay.copy()
@@ -1354,6 +1247,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                                 else:
                                     message += 'Ответственный (робот) отклонил заявку на отложенное значение реквизита ID: ' \
                                        + str(current_param['id']) + '<br>'
+                                    is_change = False
                         if is_change:
                             if o.id:
                                 json_object['new_obj'] = o
@@ -1383,7 +1277,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                 is_saved = True
                 ContractCells.objects.bulk_update([eo['new_obj'] for eo in edit_objects if 'old_value' in eo], ['value'])
                 ContractCells.objects.bulk_update([eo['new_obj'] for eo in edit_objects if 'old_delay' in eo], ['delay'])
-                # регистрация редактирования
+                # регистрация редактирования создание тасков для делеев
                 for eo in edit_objects:
                     ic = general_reg_data.copy()
                     ic['id'] = eo['new_obj'].id
@@ -1456,63 +1350,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
             # Сохраним техпроцессы
             if change_tps:
                 is_saved = True
-                for ta_k, ta_v in tps_all.items():
-                    if ta_v['changed']:
-                        tp_info = next(t for t in tps if t['id'] == ta_k)
-                        stages = TechProcessObjects.objects.filter(parent_structure_id=ta_k, parent_code=code)
-                        if not stages:
-                            val = {'fact': 0, 'delay': []}
-                            stages_0 = TechProcessObjects(parent_structure_id=ta_k, parent_code=code,
-                                                          name_id=tp_info['stages'][0]['id'], value=val)
-                            stages = [stages_0]
-                        task_code = None; task_transact = None
-                        tp_trans = reg_funs.get_transact_id(ta_k, code, 'p')
-                        # Если было изменение контрольного поля - внесем изменение в первую стадию
-                        if ta_v['cf_delta']:
-                            stage_0 = stages[0]
-                            inc_val = copy.deepcopy(stage_0.value)
-                            inc = {'class_id': ta_k, 'type': 'tp', 'location': 'contract', 'code': code,
-                                   'name': stage_0.name_id, 'id': stage_0.id, 'value': inc_val}
-                            outc_val = copy.deepcopy(stage_0.value)
-                            outc_val['fact'] += ta_v['cf_delta']
-                            stage_0.value = outc_val
-                            stage_0.save()
-                            outc = inc.copy()
-                            outc['value'] = outc_val
-                            reg = {'json': outc, 'json_income': inc}
-                            reg_funs.simple_reg(request.user.id, 15, timestamp, tp_trans, transact_id, **reg)
-                        for k, v in ta_v['new_stages'].items():
-                            if v['delta']:
-                                stage_info = next(s for s in tp_info['stages'] if s['id'] == k)
-                                stage = None
-                                try:
-                                    stage = next(s for s in stages if s.name_id == k)
-                                except StopIteration:
-                                    stage = TechProcessObjects(parent_structure_id=ta_k, parent_code=code, name_id=k,
-                                                               value={'fact': 0, 'delay': []})
-                                finally:
-                                    if not task_code:
-                                        task_code, task_transact = task_funs.reg_create_task(request.user.id, timestamp,
-                                                                                             transact_id)
-                                    new_delay = {'value': v['delta'], 'date_create': datetime.strftime(timestamp, '%Y-%m-%dT%H:%M:%S')}
-                                    inc = {'class_id': ta_k, 'type': 'tp', 'location': 'contract', 'code': code,
-                                           'name': k, 'value': copy.deepcopy(stage.value)}
-                                    stage.value['delay'].append(new_delay)
-                                    stage.save()
-                                    # Регистрация изменений
-                                    outc = inc.copy()
-                                    outc['value'] = stage.value
-                                    reg = {'json': outc, 'json_income': inc}
-                                    reg_funs.simple_reg(request.user.id, 15, timestamp, tp_trans, transact_id, **reg)
-                                    # Создаем таск
-                                    delay = sum(d['value'] for d in stage.value['delay'])
-                                    sender_fio = request.user.first_name + ' ' + request.user.last_name
-                                    task_funs.mt4s(code, stage_info['value']['handler'], request.user.id, sender_fio,
-                                                   stage.value['fact'], delay + stage.value['fact'], delay, v['delta'],
-                                                   stage.name_id, task_code, tp_info, timestamp, task_transact, transact_id)
-                        if task_code:
-                            task_funs.do_task2(task_code, request.user.id, timestamp, task_transact, transact_id)
-
+                interface_procedures.save_tps(tps, tps_all, code, request.user, timestamp, transact_id)
         else:
             message_class = 'text-red'
             # if params['source'] != 'draft' and current_class.formula == 'contract':
@@ -1532,7 +1370,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
             objects = []
             # Сохраняем
             if current_class.formula == 'contract':
-                val = {'datetime_create': datetime.today().strftime('%Y-%m-%dT%H:%M:%S'), 'is_done': False,
+                val = {'datetime_create': timestamp.strftime('%Y-%m-%dT%H:%M:%S'), 'is_done': False,
                        'handler': request.user.id}
                 system_data_cell = ContractCells(code=code, parent_structure_id=int(request.GET['class_id']),
                                                  name_id=system_data_id, value=val)
@@ -1562,8 +1400,8 @@ def save_contract_object(request, code, current_class, class_params, **params):
                     if handler:
                         v = None
                     if re.match(r'^i_filename_.\d+$', k) and v:
-                        res, v, msg = app.functions.files_funs.upload_file(request, 'i_file_'
-                                                                           + str(field_id), v, True)
+                        res, v, msg = app.functions.files_funs\
+                            .upload_file(request, 'i_file_' + str(field_id), v, request.POST['class_id'], True)
                         if res == 'f':
                             message += msg
                             message_class = 'text-red'
@@ -1582,7 +1420,8 @@ def save_contract_object(request, code, current_class, class_params, **params):
                             except KeyError:
                                 continue
                             if v_file:
-                                res, delay_value, msg = upload_file(request, 'i_file_' + str(field_id) + '_delay', v_file)
+                                res, delay_value, msg = upload_file(request, 'i_file_' + str(field_id) + '_delay',
+                                                                    v_file, request.POST['class_id'])
                                 if res == 'f':
                                     message += msg
                                     message_class = 'text-red'
@@ -1622,7 +1461,6 @@ def save_contract_object(request, code, current_class, class_params, **params):
                 message = 'Запись контракта успешно создана. Код записи: ' + str(code) + '<br>'
                 # Регистрация реквизитов объекта
                 new_object_params = ContractCells.objects.filter(code=code, parent_structure_id=current_class.id)
-                list_task_info = []
                 for nop in new_object_params:
                     outcom = model_to_dict(nop)
                     del outcom['code']
@@ -1639,6 +1477,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                             nop.save()
                         else:
                             ts = timestamp
+
                         del outcom_delay['value']
                         reg_delay = {'json': outcom_delay}
                         reg_funs.simple_reg(request.user.id, 22, ts, transact_id, **reg_delay)
@@ -1664,6 +1503,17 @@ def save_contract_object(request, code, current_class, class_params, **params):
                     first_stage = TechProcessObjects(parent_structure_id=tp['id'], parent_code=code,
                                                      name_id=tp['stages'][0]['id'], value=val)
                     first_stage.save()
+                    outc = model_to_dict(first_stage)
+                    outc['class_id'] = outc['parent_structure']
+                    del outc['parent_structure']
+                    outc['code'] = outc['parent_code']
+                    del outc['parent_code']
+                    outc['location'] = 'contract'
+                    outc['type'] = 'tp'
+                    reg = {'json': outc}
+                    trans_tp = reg_funs.get_transact_id(tp['id'], code, 'p')
+                    reg_funs.simple_reg(request.user.id, 13, timestamp, trans_tp, transact_id, **reg)
+                objects = new_object_params
 
         else:
             message_class = 'text-red'
@@ -2093,125 +1943,158 @@ def ccpv(class_id, class_type, location, param_name, param_type, **params):
     return 'ok'
 
 
-# spot = save params of tp
-def spot(tp_id, user_id, **params):
-    # верификация
-    try:
-        tp = TechProcess.objects.get(id=tp_id)
-    except ObjectDoesNotExist:
-        return 'Некорректно указано ID техпроцесса<br>'
-    # проверим контрольное поле
-    change_cf = False  # переменная включается один раз. Во время инициализации контрольного поля техпроцессов
-    # Изменить контрольное поле можно, но один раз - с пустого на непустой
-    if not tp.value['control_field'] and 'control_field' in params and params['control_field']:
-        change_cf = True
+# spot = save params of tp - Можно удалить после 20.04.2024
+# def spot(tp_id, user_id, **params):
+#     # верификация
+#     try:
+#         tp = TechProcess.objects.get(id=tp_id)
+#     except ObjectDoesNotExist:
+#         return 'Некорректно указано ID техпроцесса<br>'
+#     # проверим контрольное поле
+#     change_cf = False  # переменная включается один раз. Во время инициализации контрольного поля техпроцессов
+#     # Изменить контрольное поле можно, но один раз - с пустого на непустой
+#     if not tp.value['control_field'] and 'control_field' in params and params['control_field']:
+#         change_cf = True
+#         try:
+#             Contracts.objects.get(parent_id=tp.parent_id, id=params['control_field'], formula='float')
+#         except (ObjectDoesNotExist, MultipleObjectsReturned):
+#             return 'Некорректно указан ID контрольного поля<br>'
+#     # проверим стадии
+#     change_stages = False
+#     if 'stages' in params:
+#         old_stages = TechProcess.objects.get(name='stages', parent_id=tp_id)
+#         if old_stages.value != params['stages']:
+#             change_stages = True
+#             if not type(params['stages']) is list:
+#                 return 'Некорректно заданы стадии техпроцесса. Укажите стадии в виде списка строк<br>'
+#     if 'link_map' in params:
+#         old_lm = TechProcess.objects.get(name='link_map', parent_id=tp_id)
+#         if old_lm.value != params['link_map']:
+#             interface_procedures.iscrh(tp_id, old_lm.value, params['link_map'])
+#             err_text = 'Некорректно заданы ЛинкМап. Укажите в виде списка словарей, ' \
+#                        'где у словаря следующая структура: {name: str, handler: int, children: list}. ' \
+#                        'Названия стадий не должны повторяться. Handler - это ID ответственного пользователя,' \
+#                        ' children - список стадий, в которые возможно движение с данной стадии<br>'
+#             for lm in params['link_map']:
+#                 # Проверка структуры
+#                 if not ('name' in lm and 'handler' in lm and 'children' in lm):
+#                     return err_text
+#                 # Проверка повторимости имен
+#                 if lm['name'] in [lmlm['name'] for lmlm in params['link_map'] if params['link_map'].index(lmlm) !=
+#                                                                                  params['link_map'].index(lm)]:
+#                     return err_text
+#                 # Проверка ответственных
+#                 if lm['handler'] and not type(lm['handler']) is int:
+#                     return err_text
+#                 if lm['handler'] and not get_user_model().objects.filter(id=lm['handler']):
+#                     return err_text
+#                 # Проверка детей
+#                 if not type(lm['children']) is list:
+#                     return err_text
+#                 lnwc = [s for s in params['stages'] if s != lm['name']]  # list names without current
+#                 for c in lm['children']:
+#                     if c not in lnwc:
+#                         return  err_text
+#
+#     timestamp = params['timestamp'] if 'timestamp' in params else datetime.today()
+#     transact_id = reg_funs.get_transact_id(tp_id, 0, 'p')
+#     parent_transact = params['parent_transact'] if 'parent_transact' in params else None
+#     # Сохраним изменения
+#     is_change = False
+#     if change_cf:
+#         is_change = True
+#         inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'control_field': tp.value['control_field']}
+#         outc = inc.copy()
+#         outc['control_field'] = params['control_field']
+#         tp.value['control_field'] = params['control_field']
+#         tp.save()
+#         reg = {'json': outc, 'json_income': inc}
+#         reg_funs.simple_reg(user_id, 3, timestamp, transact_id, parent_transact, **reg)
+#     if change_stages:
+#         is_change = True
+#         inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_stages.id, 'name': 'stages',
+#                'value': old_stages.value}
+#         outc = inc.copy()
+#         outc['value'] = params['stages']
+#         old_stages.value = params['stages']
+#         old_stages.save()
+#         reg = {'json': outc, 'json_income': inc}
+#         reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
+#     if 'business_rule' in params:
+#         old_br = TechProcess.objects.get(name='business_rule', parent_id=tp_id)
+#         if old_br.value != params['business_rule']:
+#             is_change = True
+#             inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_br.id,
+#                    'name': 'business_rule', 'value': old_br.value}
+#             outc = inc.copy()
+#             outc['value'] = params['business_rule']
+#             old_br.value = params['business_rule']
+#             old_br.save()
+#             reg = {'json': outc, 'json_income': inc}
+#             reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
+#     if 'link_map' in params:
+#         old_lm = TechProcess.objects.get(name='link_map', parent_id=tp_id)
+#         if old_lm.value != params['link_map']:
+#             is_change = True
+#             # Если имя было изменено, исправим это имя везде в истории
+#
+#             inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_lm.id,
+#                    'name': 'link_map', 'value': old_lm.value}
+#             outc = inc.copy()
+#             outc['value'] = params['link_map']
+#             old_lm.value = params['link_map']
+#             old_lm.save()
+#             reg = {'json': outc, 'json_income': inc}
+#             reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
+#     if 'trigger' in params:
+#         old_tr = TechProcess.objects.get(name='trigger', parent_id=tp_id)
+#         if old_tr.value != params['trigger']:
+#             is_change = True
+#             inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_tr.id,
+#                    'name': 'trigger', 'value': old_tr.value}
+#             outc = inc.copy()
+#             outc['value'] = params['trigger']
+#             old_tr.value = params['trigger']
+#             old_tr.save()
+#             reg = {'json': outc, 'json_income': inc}
+#             reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
+#     result = 'ok' if is_change else 'Вы ничего не изменили<br>'
+#     # Если была инициализация контрольного поля техпроцесса - заполним объекты техпроцессов для всех объектов контрактов
+#     if change_cf:
+#         cells = ContractCells.objects.filter(parent_structure_id=tp.parent_id, name_id=tp.value['control_field'])
+#         for c in cells:
+#             interface_procedures.mtp(c, old_stages)
+#     return result
+
+def valid_api_data(request):
+    is_valid = True
+    message = ''
+    # Получим основные параметры
+    code = None
+    if not 'code' in request.GET:
+        is_valid = False
+        message += 'Не указан обязательный параметр - код. '
+    else:
         try:
-            Contracts.objects.get(parent_id=tp.parent_id, id=params['control_field'], formula='float')
-        except (ObjectDoesNotExist, MultipleObjectsReturned):
-            return 'Некорректно указан ID контрольного поля<br>'
-    # проверим стадии
-    change_stages = False
-    if 'stages' in params:
-        old_stages = TechProcess.objects.get(name='stages', parent_id=tp_id)
-        if old_stages.value != params['stages']:
-            change_stages = True
-            if not type(params['stages']) is list:
-                return 'Некорректно заданы стадии техпроцесса. Укажите стадии в виде списка строк<br>'
-    if 'link_map' in params:
-        old_lm = TechProcess.objects.get(name='link_map', parent_id=tp_id)
-        if old_lm.value != params['link_map']:
-            interface_procedures.iscrh(tp_id, old_lm.value, params['link_map'])
-            err_text = 'Некорректно заданы ЛинкМап. Укажите в виде списка словарей, ' \
-                       'где у словаря следующая структура: {name: str, handler: int, children: list}. ' \
-                       'Названия стадий не должны повторяться. Handler - это ID ответственного пользователя,' \
-                       ' children - список стадий, в которые возможно движение с данной стадии<br>'
-            for lm in params['link_map']:
-                # Проверка структуры
-                if not ('name' in lm and 'handler' in lm and 'children' in lm):
-                    return err_text
-                # Проверка повторимости имен
-                if lm['name'] in [lmlm['name'] for lmlm in params['link_map'] if params['link_map'].index(lmlm) !=
-                                                                                 params['link_map'].index(lm)]:
-                    return err_text
-                # Проверка ответственных
-                if lm['handler'] and not type(lm['handler']) is int:
-                    return err_text
-                if lm['handler'] and not get_user_model().objects.filter(id=lm['handler']):
-                    return err_text
-                # Проверка детей
-                if not type(lm['children']) is list:
-                    return err_text
-                lnwc = [s for s in params['stages'] if s != lm['name']]  # list names without current
-                for c in lm['children']:
-                    if c not in lnwc:
-                        return  err_text
-
-    timestamp = params['timestamp'] if 'timestamp' in params else datetime.today()
-    transact_id = reg_funs.get_transact_id(tp_id, 0, 'p')
-    parent_transact = params['parent_transact'] if 'parent_transact' in params else None
-    # Сохраним изменения
-    is_change = False
-    if change_cf:
-        is_change = True
-        inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'control_field': tp.value['control_field']}
-        outc = inc.copy()
-        outc['control_field'] = params['control_field']
-        tp.value['control_field'] = params['control_field']
-        tp.save()
-        reg = {'json': outc, 'json_income': inc}
-        reg_funs.simple_reg(user_id, 3, timestamp, transact_id, parent_transact, **reg)
-    if change_stages:
-        is_change = True
-        inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_stages.id, 'name': 'stages',
-               'value': old_stages.value}
-        outc = inc.copy()
-        outc['value'] = params['stages']
-        old_stages.value = params['stages']
-        old_stages.save()
-        reg = {'json': outc, 'json_income': inc}
-        reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-    if 'business_rule' in params:
-        old_br = TechProcess.objects.get(name='business_rule', parent_id=tp_id)
-        if old_br.value != params['business_rule']:
-            is_change = True
-            inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_br.id,
-                   'name': 'business_rule', 'value': old_br.value}
-            outc = inc.copy()
-            outc['value'] = params['business_rule']
-            old_br.value = params['business_rule']
-            old_br.save()
-            reg = {'json': outc, 'json_income': inc}
-            reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-    if 'link_map' in params:
-        old_lm = TechProcess.objects.get(name='link_map', parent_id=tp_id)
-        if old_lm.value != params['link_map']:
-            is_change = True
-            # Если имя было изменено, исправим это имя везде в истории
-
-            inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_lm.id,
-                   'name': 'link_map', 'value': old_lm.value}
-            outc = inc.copy()
-            outc['value'] = params['link_map']
-            old_lm.value = params['link_map']
-            old_lm.save()
-            reg = {'json': outc, 'json_income': inc}
-            reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-    if 'trigger' in params:
-        old_tr = TechProcess.objects.get(name='trigger', parent_id=tp_id)
-        if old_tr.value != params['trigger']:
-            is_change = True
-            inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_tr.id,
-                   'name': 'trigger', 'value': old_tr.value}
-            outc = inc.copy()
-            outc['value'] = params['trigger']
-            old_tr.value = params['trigger']
-            old_tr.save()
-            reg = {'json': outc, 'json_income': inc}
-            reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-    result = 'ok' if is_change else 'Вы ничего не изменили<br>'
-    # Если была инициализация контрольного поля техпроцесса - заполним объекты техпроцессов для всех объектов контрактов
-    if change_cf:
-        cells = ContractCells.objects.filter(parent_structure_id=tp.parent_id, name_id=tp.value['control_field'])
-        for c in cells:
-            interface_procedures.mtp(c, old_stages)
-    return result
+            code = int(request.GET['code'])
+        except ValueError:
+            is_valid = False
+            message += 'Некорректно указан код объекта. Укажите целое число. '
+    class_id = None
+    if not 'class_id' in request.GET:
+        is_valid = False
+        message += 'Не указан обязательный параметр - class_id. '
+    else:
+        try:
+            class_id = int(request.GET['class_id'])
+        except ValueError:
+            is_valid = False
+            message += 'Некорректно указан код объекта. Укажите целое число. '
+    location = 'table'
+    if 'location' in request.GET:
+        location = request.GET['location']
+        if request.GET['location'] not in ('table', 'contract', 'dict', 'tp'):
+            is_valid = False
+            message += 'Некорректно указано расположение объекта. Задайте параметр location одним из следующих значений: ' \
+                       'table, contract, dict, tp. '
+    return is_valid, message, class_id, code, location

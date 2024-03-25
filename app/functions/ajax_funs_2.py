@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 import json
 import operator
@@ -6,13 +7,14 @@ from functools import reduce
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 from django.db.models.fields.json import KeyTextTransform
+from django.forms import model_to_dict
 from django.http import HttpResponse
 
 import app.functions.contract_funs
 import app.functions.interface_procedures
 from app.functions import view_procedures, interface_funs, convert_funs, session_funs, contract_funs, hist_funs
 from app.models import TableDrafts, Designer, ContractDrafts, Contracts, ContractCells, Objects, TechProcess, \
-    RegistratorLog, TechProcessObjects, DictObjects, Dictionary
+    RegistratorLog, TechProcessObjects, DictObjects, Dictionary, MainPageConst
 from django.contrib.auth import get_user_model
 
 
@@ -197,7 +199,7 @@ def gov(request):
     class_id = int(request.GET['class_id'])
     code = int(request.GET['code'])
     location = 'contract' if request.GET['location'] == 'c' else 'table' if request.GET['location'] == 't' else 'dict'
-    timestamp = datetime.strptime(request.GET['timestamp'], '%Y-%m-%dT%H:%M:%S') + timedelta(seconds=1)
+    timestamp = datetime.strptime(request.GET['timestamp'], '%Y-%m-%dT%H:%M:%S')
     user_id = request.user.id
     object = hist_funs.gov(class_id, code, location, timestamp, tom, user_id)
     # Если в объекте есть массив - то причешем его поля-ссылки
@@ -205,7 +207,7 @@ def gov(request):
     for obj_k, obj_v in object.items():
         if obj_k in ('code', 'parent_structure', 'type'):
             continue
-        if 'headers' in obj_v:
+        if type(obj_v) is dict and 'headers' in obj_v:
             headers = [h for h in obj_v['headers'] if h['formula'] == 'link']
             if headers:
                 convert_funs.prepare_table_to_template(headers, obj_v['objects'], user_id, is_contract)
@@ -231,3 +233,36 @@ def do_cc(request):
 def gaff(request):
     class_params = list(Contracts.objects.filter(parent_id=int(request.GET['class_id']), system=False, formula='float').values('id', 'name'))
     return HttpResponse(json.dumps(class_params, ensure_ascii=False), content_type="application/json")
+
+
+@view_procedures.is_auth
+@view_procedures.if_error_json
+def calc_user_formula(request):
+    list_params = json.loads(request.GET['list_params'])
+    const_id = int(request.GET['const_id'])
+    is_contract = (request.GET['is_contract'] == 'true')
+    manager = Contracts.objects if is_contract else Designer.objects
+    our_const = manager.get(id=const_id)
+    our_const = model_to_dict(our_const)
+    for lp in list_params:
+        our_const['value'] = re.sub(r'\[\[\s*\n*\s*user_data_' + lp['id'] + '[\w\W]*?\]\]', lp['value'],
+                                    our_const['value'], flags=re.M)
+    convert_funs.deep_formula(our_const, (our_const, ), request.user.id, is_contract)
+    return HttpResponse(json.dumps(our_const[our_const['id']]['value'], ensure_ascii=False), content_type="application/json")
+
+# cmpf = calc main page formula
+@view_procedures.if_error_json
+def cmpf(request):
+    list_params = json.loads(request.GET['list_params'])
+    const_id = int(request.GET['const_id'])
+    our_const = MainPageConst.objects.get(id=const_id)
+    our_const = model_to_dict(our_const)
+    if not request.user.id and our_const['user_login']:
+        result = ''
+    else:
+        for lp in list_params:
+            our_const['value'] = re.sub(r'\[\[\s*\n*\s*user_data_' + lp['id'] + '[\w\W]*?\]\]', lp['value'],
+                                        our_const['value'], flags=re.M)
+        convert_funs.deep_formula(our_const, (our_const, ), request.user.id)
+        result = our_const[our_const['id']]['value']
+    return HttpResponse(json.dumps(result, ensure_ascii=False), content_type="application/json")

@@ -128,13 +128,14 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                 var = int(var)
             except:
                 return 'Ошибка. Некорректно указан адрес ссылки'
-            try:
-                if is_contract:
-                    deep_header = Contracts.objects.filter(id=var).values()[0]
-                else:
-                    deep_header = Designer.objects.filter(id=var).values()[0]
-            except:
-                return 'Ошибка. Некорректно указан путь к объекту'
+            else:
+                try:
+                    if is_contract:
+                        deep_header = Contracts.objects.filter(id=var).values()[0]
+                    else:
+                        deep_header = Designer.objects.filter(id=var).values()[0]
+                except:
+                    return 'Ошибка. Некорректно указан путь к объекту'
 
             if not var in object or not object[var]:
                 if var in object:
@@ -143,7 +144,8 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                     deep_objects = [object, ]
                     deep_formula(deep_header, deep_objects, user_id, is_contract, *link_chain, is_draft=is_draft)
                     return object[var]['value']
-                elif deep_header['formula'] in ('float', 'bool', 'date', 'datetime', 'const', 'enum', 'string', 'file'):
+                elif deep_header['formula'] in ('float', 'bool', 'date', 'datetime', 'const', 'enum', 'string',
+                                                'file', 'link'):
                     object_manager = ContractCells.objects if is_contract else Objects.objects
                     cell = object_manager.filter(parent_structure_id=object['parent_structure'], code=object['code'], name_id=var)
                     if cell:
@@ -220,6 +222,24 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
             return '\'Ошибка. Ссылка некорректна\'', False
         return deep_object, is_link_contract
 
+    def get_tp(array, **opt_params):
+        if len(array) != 4:
+            return 'Ошибка. Некорректно задана формула техпроцесса'
+        tp_id = int(array[1])
+        code = int(array[2])
+        name_id = int(array[3])
+        data_kind = opt_params['type_value']
+        try:
+            my_tp = TechProcessObjects.objects.get(parent_structure_id=tp_id, name_id=name_id, parent_code=code)
+        except ObjectDoesNotExist:
+            return 'Ошибка. Данные техпроцесса некорректны. Не найден объект'
+        if data_kind == 'fact':
+            return my_tp.value['fact']
+        elif data_kind == 'delay':
+            return sum(d['value'] for d in my_tp.value['delay'])
+        else:
+            return sum(d['value'] for d in my_tp.value['delay']) + my_tp.value['fact']
+
     # Получим все переменные в виде списка словарей
     dict_foreign_formuls = {}
     for o in objects:
@@ -251,9 +271,7 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                     for jv in json_vars:
                         k = list(jv.keys())[0]
                         v = list(jv.values())[0]
-                        if not v:
-                            formula = 'result = \'Ошибка. Некорректно задана формула\''
-                            break
+
                         opt_params = get_opt_params(k)  # получим опциональные параметры
                         if opt_params['node']:
                             if 'code' in o.keys():
@@ -263,6 +281,9 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                                 break
                         opt_params['type_value'] = v[-1]
                         v = v[:len(v) - 1]
+                        if not v:
+                            formula = 'result = \'Ошибка. Некорректно задана формула\''
+                            break
                         # Если данная формула была вычислена - то укажем ее значение
                         if k in dict_foreign_formuls.keys():
                             value_var = dict_foreign_formuls[k]
@@ -311,46 +332,9 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                                     parent_branch = parent_branch[0]
                                     if parent_branch.value:
                                         value_var = tree_funs.glwt(header['parent_id'], parent_branch.value, is_contract)
-                        # маркер tp - возвращает значение стадии техпроцесса
-                        elif re.match(r'\s*tp\.', k):
-                            # Если в объекте имеются данные об указанном техпроцессе - используем их.
-                            if 'tps' in o:
-                                try:
-                                    tp_id = int(v[0])
-                                except ValueError:
-                                    return 'Ошибка. Некорректно указан ID техпроцесса. Укажите целое число<br>'
-                                try:
-                                    tp = o['tps'][tp_id]
-                                except KeyError:
-                                    return 'Ошибка. Некорректно указан ID техпроцесса. У данного класса не найден техпроцесс с ID ' \
-                                           + v[0] + '<br>'
-                                try:
-                                    tp_stage = tp[v[1]]
-                                except KeyError:
-                                    return 'Ошибка. Некорректно указана стадия техпроцесса. У техпроцесса ID ' + v[0] + \
-                                            ' не найдена стадия "' + v[1] + '<br>'
-                                if not v[2]:
-                                    value_var = tp_stage['state']
-                                else: value_var = tp_stage[v[2]]
-                            # Если в объекте нет данных о техпроцессе - найдем их в БД
-                            else:
-                                try:
-                                    current_stage = TechProcessObjects.objects.filter(parent_structure_id=int(v[0]),
-                                                                                  parent_code=o['code'], value__stage=v[1])
-                                except Exception as ex:
-                                    formula = 'result = \'Ошибка. У класса данного объекта нет техпроцесса с ID ' + v[0] +\
-                                        ', или формула задана некорректно<br>\''
-                                else:
-                                    if current_stage:
-                                        current_stage = current_stage[0]
-                                        if not v[2] or v[2] == 'state':
-                                            value_var = current_stage.value['fact'] + \
-                                                        sum([d['value'] for d in current_stage.value['delay']])
-                                        elif v[2] == 'fact':
-                                            value_var = current_stage.value['fact']
-                                        elif v[2] == 'delay':
-                                            value_var = sum([d['value'] for d in current_stage.value['delay']])
-                                    else:   value_var = 0
+                        # Если имеем дело с техпроцессом
+                        elif v[0].lower() == 'tp':
+                            value_var = get_tp(v, **opt_params)
                         # Если формула внешняя - получим  значение переменной
                         elif v[0].lower() in ('table', 'contract'):
                             value_var = foreign_link(v, user_id, *link_chain, is_draft=is_draft, **opt_params)
@@ -367,9 +351,13 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                                         value_var = last_var(deep_object, v[i], opt_params['type_value'], is_link_contract)
                                     else:
                                         value_var = 'Ошибка. Ссылка некорректна'
+
                         if type(value_var) is str:
                             value_var = re.sub(r'\'', '\"', value_var)
-                            value_var = '\'\'\'' + value_var + '\'\'\''
+                            if re.search(r'\n', value_var):
+                                value_var = '\'\'\'' + value_var + '\'\'\''
+                            else:
+                                value_var = '\'' + value_var + '\''
                         elif type(value_var) is bool:
                             value_var = 'True' if value_var else "False"
                         elif type(value_var) is list:
@@ -839,6 +827,7 @@ def foreign_link(array, user_id, *link_chain, **params):
                return 'Ошибка. Некорректно задан адрес статической ссылки'
             else:
                return static_formula(const.value, user_id, *link_chain, **params)
+
 
 # work with history - работаем с историей. Если находит опциональные параметры, говорящие о работе в истории - возвращает значение.
 # Если было найдено значение ячейки - возвращает его. Если была ошибка - возвращает текст ошибки.

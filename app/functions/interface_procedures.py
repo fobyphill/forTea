@@ -3,6 +3,8 @@ import re
 import copy
 from datetime import datetime, date
 
+from django.core.exceptions import ObjectDoesNotExist
+
 from app.functions import tree_funs, view_procedures, task_funs, reg_funs, update_funs, convert_funs
 from app.models import Dictionary, Contracts, Designer, ContractCells, Objects, TechProcessObjects, RegistratorLog
 
@@ -330,10 +332,15 @@ def mofr(code, class_id, headers, dict_object, old_object, is_contract=True):
         delay = old_req.delay.copy() if old_req.delay else []
         if is_delay:
             key_date_delay = 'i_datetime_' + pure_key + '_delay_datetime'
-            if key_date_delay in dict_object and dict_object[key_date_delay]:
-                new_delay = dict_object[key + '_delay']
+            api_key_dd = pure_key + '_delay_date'
+            if key_date_delay in dict_object and dict_object[key_date_delay] \
+                    or api_key_dd in dict_object and dict_object[api_key_dd]:
+                key_delay = key + '_delay'
+                pure_key_delay = pure_key + '_delay'
+                new_delay = dict_object[key_delay] if key_delay in dict_object else dict_object[pure_key_delay]
                 new_delay = convert_data(h, new_delay)
-                new_delay = {'value': new_delay, 'date_update': dict_object[key_date_delay]}
+                new_date_delay = dict_object[key_date_delay] if key_date_delay in dict_object else dict_object[api_key_dd]
+                new_delay = {'value': new_delay, 'date_update': new_date_delay}
                 delay.append(new_delay)
         presaved_object[h['id']] = {'value': val, 'delay': delay}
 
@@ -358,3 +365,187 @@ def mofr(code, class_id, headers, dict_object, old_object, is_contract=True):
     #             presaved_object['tps'][tp['id']][s['id']] = {'state': new_state, 'fact': old_fact, 'delay': new_delay}
     #             counter += 1
     return presaved_object
+
+
+# Техпроцессы. Валидация, проверка изменений
+def check_changes_tps(tps, code, params):
+    tps_all = {}
+    message = ''
+    tps_chng = False
+    tps_valid = True
+    def make_stages(list_stage):
+        output_dict = {}
+        for ls in list_stage:
+            val = {'fact': 0, 'delay': []}
+            output_dict[ls] = val
+        return output_dict
+    for tp in tps:
+        dictp = {}
+
+        # Формируем старые стадии
+        if code:
+            old_stages = list(TechProcessObjects.objects.filter(parent_structure_id=tp['id'], parent_code=code)
+                              .values('name_id', 'value'))
+            old_stages_dict = {}
+            old_stages_ids = []
+            if old_stages:
+                for os in old_stages:
+                    old_stages_dict[os['name_id']] = os['value']
+                    old_stages_ids.append(os['name_id'])
+            else:
+                # Если по какой-то причине потеряны данные о техпроцессе - заполним его так: первая стадия = КП. Остальные пустые
+                first_stage = tp['stages'][0]
+                try:
+                    cf_old = ContractCells.objects.get(parent_structure_id=tp['parent_id'], code=code,
+                                                       name_id=tp['cf'])
+                except ObjectDoesNotExist:
+                    cf_old_val = 0
+                else:
+                    cf_old_val = cf_old.value
+                old_stages_dict[first_stage['id']] = {'fact': cf_old_val, 'delay': []}
+                old_stages_ids.append(first_stage['id'])
+            absent_stages = [s['id'] for s in tp['stages'] if s['id'] not in old_stages_ids]
+            old_stages_dict.update(make_stages(absent_stages))
+        else:
+            old_stages_dict = make_stages([s['id'] for s in tp['stages']])
+        dictp['old_stages'] = old_stages_dict
+        # формируем новые стадии
+        new_stages = {}
+        stages_ids = ['i_stage_' + str(s['id']) for s in tp['stages']]
+        for k, v in params.items():
+            if k in stages_ids:
+                new_stages[int(k[8:])] = {'value': float(v) if v else 0}
+        dictp['new_stages'] = new_stages
+        dictp['changed'] = False
+        for k, old_v in dictp['old_stages'].items():
+            old_value = old_v['fact'] + sum([od['value'] for od in old_v['delay']])
+            if k in dictp['new_stages']:
+                if old_value != dictp['new_stages'][k]['value']:
+                    dictp['changed'] = True
+                    tps_chng = True
+                    dictp['new_stages'][k]['delta'] = dictp['new_stages'][k]['value'] - old_value
+                else:
+                    dictp['new_stages'][k]['delta'] = 0
+            else:
+                dictp['new_stages'][k] = {'delta': 0, 'value': old_value}
+
+        tps_all[tp['id']] = dictp
+        # Вычисляем базовое ТП - все стадии = КП
+        if dictp['changed']:
+            cf_key = 'i_float_' + str(tp['cf'])
+            if cf_key not in params:
+                cf = ContractCells.objects.filter(parent_structure_id=tp['parent_id'], code=code, name_id=tp['cf'])
+                if cf:
+                    cf_fact = cf[0].value
+                else:
+                    cf_fact = 0
+            else:
+                cf_fact = float(params[cf_key]) if params[cf_key] else 0
+
+            if cf_fact != sum([v['value'] for v in dictp['new_stages'].values()]):
+                tps_valid = False
+                message += 'Изменения в техпроцессе ' + str(tp['id']) + \
+                           ' некорректны. Сумма всех этапов должна рваняться контрольному полю<br>'
+            else:
+                # Калькулятор маршрутизации
+                is_first_stage = True
+                cf_old_val = sum(ost['fact'] + sum(d['value'] for d in ost['delay']) for ost in dictp['old_stages'].values())
+                cf_delta = cf_fact - cf_old_val
+                dictp['cf_delta'] = cf_delta
+                valid_delta = True
+                for k, v in dictp['new_stages'].items():
+                    if is_first_stage:
+                        is_first_stage = False
+                        if cf_delta:
+                            v['valid_delta'] = True
+                            v['delta'] -= cf_delta
+                            continue
+                    if not v['delta']:
+                        v['valid_delta'] = True
+                    if 'valid_delta' in v and v['valid_delta']:
+                        continue
+                    if v['delta'] < 0:
+                        old_stage = next(ost['value'] for ost in old_stages if ost['name_id'] == k)
+                        old_delay = sum(d['value'] for d in old_stage['delay'])
+                        old_state = old_stage['fact'] + old_delay if old_delay < 0 else old_stage['fact']
+                        if v['delta'] + old_state < 0:
+                            valid_delta = False
+                            break
+                        partners = next(s['value']['children'] for s in tp['stages'] if s['id'] == k)
+                    else:
+                        partners = [s['id'] for s in tp['stages'] if k in s['value']['children']]
+                    partners_deltas = sum(dictp['new_stages'][p]['delta'] for p in partners)
+                    if partners_deltas * -1 == v['delta']:
+                        v['valid_delta'] = True
+                        for p in partners:
+                            dictp['new_stages'][p]['valid_delta'] = True
+                else:
+                    for k, v in dictp['new_stages'].items():
+                        if not 'valid_delta' in v:
+                            valid_delta = False
+                            break
+                if not valid_delta:
+                    message += 'Изменения в техпроцессе ' + str(tp['id']) + \
+                               ' некорректны. Имеются нарушения целостности данных<br>'
+                    tps_valid = False
+    return tps_all, tps_chng, tps_valid, message
+
+# Сохраним техпроцессы
+def save_tps(tps, tps_all, code, user_data, timestamp, parent_trans):
+    for ta_k, ta_v in tps_all.items():
+        if ta_v['changed']:
+            tp_info = next(t for t in tps if t['id'] == ta_k)
+            stages = TechProcessObjects.objects.filter(parent_structure_id=ta_k, parent_code=code)
+            if not stages:
+                val = {'fact': 0, 'delay': []}
+                stages_0 = TechProcessObjects(parent_structure_id=ta_k, parent_code=code,
+                                              name_id=tp_info['stages'][0]['id'], value=val)
+                stages = [stages_0]
+            task_code = None;
+            task_transact = None
+            tp_trans = reg_funs.get_transact_id(ta_k, code, 'p')
+            # Если было изменение контрольного поля - внесем изменение в первую стадию
+            if ta_v['cf_delta']:
+                stage_0 = stages[0]
+                inc_val = copy.deepcopy(stage_0.value)
+                inc = {'class_id': ta_k, 'type': 'tp', 'location': 'contract', 'code': code,
+                       'name': stage_0.name_id, 'id': stage_0.id, 'value': inc_val}
+                outc_val = copy.deepcopy(stage_0.value)
+                outc_val['fact'] += ta_v['cf_delta']
+                stage_0.value = outc_val
+                stage_0.save()
+                outc = inc.copy()
+                outc['value'] = outc_val
+                reg = {'json': outc, 'json_income': inc}
+                reg_funs.simple_reg(user_data.id, 15, timestamp, tp_trans, parent_trans, **reg)
+            for k, v in ta_v['new_stages'].items():
+                if v['delta']:
+                    stage_info = next(s for s in tp_info['stages'] if s['id'] == k)
+                    stage = None
+                    try:
+                        stage = next(s for s in stages if s.name_id == k)
+                    except StopIteration:
+                        stage = TechProcessObjects(parent_structure_id=ta_k, parent_code=code, name_id=k,
+                                                   value={'fact': 0, 'delay': []})
+                    finally:
+                        if not task_code:
+                            task_code, task_transact = task_funs.reg_create_task(user_data.id, timestamp, parent_trans)
+                        new_delay = {'value': v['delta'],
+                                     'date_create': datetime.strftime(timestamp, '%Y-%m-%dT%H:%M:%S')}
+                        inc = {'class_id': ta_k, 'type': 'tp', 'location': 'contract', 'code': code,
+                               'name': k, 'value': copy.deepcopy(stage.value)}
+                        stage.value['delay'].append(new_delay)
+                        stage.save()
+                        # Регистрация изменений
+                        outc = inc.copy()
+                        outc['value'] = stage.value
+                        reg = {'json': outc, 'json_income': inc}
+                        reg_funs.simple_reg(user_data.id, 15, timestamp, tp_trans, parent_trans, **reg)
+                        # Создаем таск
+                        delay = sum(d['value'] for d in stage.value['delay'])
+                        sender_fio = user_data.first_name + ' ' + user_data.last_name
+                        task_funs.mt4s(code, stage_info['value']['handler'], user_data.id, sender_fio,
+                                       stage.value['fact'], delay + stage.value['fact'], delay, v['delta'],
+                                       stage.name_id, task_code, tp_info, timestamp, task_transact, parent_trans)
+            if task_code:
+                task_funs.do_task2(task_code, user_data.id, timestamp, task_transact, parent_trans)
