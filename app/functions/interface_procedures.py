@@ -284,7 +284,9 @@ def rohatiw(dofr, class_id, code, current_param, class_params, object_params, us
 
 
 # mofr = make object from request
-def mofr(code, class_id, headers, dict_object, old_object, is_contract=True):
+# params = {'tps': [{'id'}]}
+def mofr(code, class_id, headers, dict_object, old_object, is_contract=True, **params):
+
     def convert_data(header, var):
         if header['formula'] == 'bool':
             if not var:
@@ -297,6 +299,7 @@ def mofr(code, class_id, headers, dict_object, old_object, is_contract=True):
             var = int(var) if var else None
         return var
 
+    tps = params['tps'] if 'tps' in params else None
     presaved_object = {'code': code, 'parent_structure': class_id}
     dict_keys = {'string': 'ta_', 'link': 'i_link_', 'float': 'i_float_', 'datetime': 'i_datetime_',
                  'date': 'i_date_', 'bool': 'chb_', 'const': 's_alias_', 'enum': 's_enum_'}
@@ -316,9 +319,9 @@ def mofr(code, class_id, headers, dict_object, old_object, is_contract=True):
         pure_key = str(h['id'])
         key = dict_keys[h['formula']] + pure_key
         # Работаем со значениями
-        if key in dict_object and dict_object[key]:
+        if key in dict_object:
             val = dict_object[key]
-        elif pure_key in dict_object and dict_object[pure_key]:
+        elif pure_key in dict_object:
             val = dict_object[pure_key]
         else:
             val = old_req.value
@@ -345,25 +348,24 @@ def mofr(code, class_id, headers, dict_object, old_object, is_contract=True):
         presaved_object[h['id']] = {'value': val, 'delay': delay}
 
     # добавим техпроцессы
-    # if tps:
-    #     presaved_object['tps'] = {}
-    #     for tp in tps:
-    #
-    #         old_stages = TechProcessObjects.objects.filter(parent_structure_id=tp['id'], parent_code=code)
-    #         presaved_object['tps'][tp['id']] = {}
-    #         counter = 0
-    #         for s in tp['stages']:
-    #             stage_key = 'i_stage_' + str(s['id'])
-    #             new_state = float(dict_object[stage_key]) if stage_key in dict_object and dict_object[stage_key] else 0
-    #             try:
-    #                 old_stage = next(os for os in old_stages if os.name_id == s['id'])
-    #             except StopIteration:
-    #                 old_fact = 0
-    #             else:
-    #                 old_fact = old_stage.value['fact'] if old_stage.value['fact'] else 0
-    #             new_delay = new_state - old_fact
-    #             presaved_object['tps'][tp['id']][s['id']] = {'state': new_state, 'fact': old_fact, 'delay': new_delay}
-    #             counter += 1
+    if tps:
+        presaved_object['tps'] = {}
+        for tp in tps:
+            old_stages = TechProcessObjects.objects.filter(parent_structure_id=tp['id'], parent_code=code)
+            presaved_object['tps'][tp['id']] = {}
+            counter = 0
+            for s in tp['stages']:
+                stage_key = 'i_stage_' + str(s['id'])
+                new_state = float(dict_object[stage_key]) if stage_key in dict_object and dict_object[stage_key] else 0
+                try:
+                    old_stage = next(os for os in old_stages if os.name_id == s['id'])
+                except StopIteration:
+                    old_fact = 0
+                else:
+                    old_fact = old_stage.value['fact'] if old_stage.value['fact'] else 0
+                new_delay = new_state - old_fact
+                presaved_object['tps'][tp['id']][s['id']] = {'state': new_state, 'fact': old_fact, 'delay': new_delay}
+                counter += 1
     return presaved_object
 
 
@@ -549,3 +551,25 @@ def save_tps(tps, tps_all, code, user_data, timestamp, parent_trans):
                                        stage.name_id, task_code, tp_info, timestamp, task_transact, parent_trans)
             if task_code:
                 task_funs.do_task2(task_code, user_data.id, timestamp, task_transact, parent_trans)
+
+
+# Упаковать видимые заголовки и список видимых айди для базового наполнения объектов
+def pack_vis_headers(current_class, headers, is_contract=False):
+    is_main_name = False
+    visible_headers = []
+    vhids = []
+    if is_contract:
+        main_name = 'system_data' if current_class.formula == 'contract' else 'Собственник'
+    else:
+        main_name = 'Наименование' if current_class.formula == 'table' else 'Собственник'
+    for h in headers:
+        if h['is_visible']:
+            visible_headers.append(h)
+            vhids.append(h['id'])
+            if h['name'] == main_name:
+                is_main_name = True
+        if len(vhids) == 5:
+            break
+    if not is_main_name:
+        vhids.append(next(h['id'] for h in headers if h['name'] == main_name))
+    return visible_headers, vhids

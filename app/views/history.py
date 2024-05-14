@@ -108,10 +108,10 @@ def hist_reg(request):
                 reg_log = reg_log.filter(Q(json__name=name_id) | Q(json_income__name=name_id))
             # Транзакция
             if 'i_transact' in request.GET and request.GET['i_transact']:
-                reg_log = reg_log.filter(transact_id__icontains=request.GET['i_transact'])
+                reg_log = reg_log.filter(transact_id__icontains=request.GET['i_transact'].lower())
             # родительская транзакция
             if 'i_parent_transact' in request.GET and request.GET['i_parent_transact']:
-                reg_log = reg_log.filter(parent_transact_id__icontains=request.GET['i_parent_transact'])
+                reg_log = reg_log.filter(parent_transact_id__icontains=request.GET['i_parent_transact'].lower())
             # Пользователь
             if filter_user:
                 reg_log = reg_log.filter(user_id=filter_user)

@@ -8,6 +8,7 @@ from django.db.models.fields.json import KeyTextTransform
 from django.http import HttpResponse
 from app.functions import convert_funs, convert_procedures, view_procedures, session_funs, hist_funs
 from app.models import Objects, Designer, Contracts, ContractCells, Dictionary, RegistratorLog, DictObjects
+from forteatoo.settings import DATABASES as dbses
 
 
 @view_procedures.if_error_json
@@ -91,36 +92,49 @@ def get_classes(request):
             formula = request.session['class_types'].keys()
         else:
             formula = request.GET['type_class'],
+        is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
         # Работаем с классами
         if request.GET['current_class']:
             dicts = Dictionary.objects.filter(formula='dict')
             tables = Designer.objects.filter(formula__in=formula)
             contracts = Contracts.objects.filter(formula__in=formula)
+            class_id = 0
             try:
                 class_id = int(request.GET['current_class'])
             except ValueError:
-                dicts = dicts.filter(name__icontains=request.GET['current_class'])
-                tables = tables.filter(name__icontains=request.GET['current_class'])
-                contracts = contracts.filter(name__icontains=request.GET['current_class'])
-            else:
-                dicts = dicts.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_class']))
-                tables = tables.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_class']))
-                contracts = contracts.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_class']))
-            if request.GET['location'] != 'all':
-                dicts = dicts.filter(default=request.GET['location'])
+                pass
+            finally:
+                if request.GET['location'] != 'all':
+                    dicts = dicts.filter(default=request.GET['location'])
+                if is_mysql:
+                    dicts = dicts.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_class']))
+                    dicts = list(dicts.values('id', 'name', 'formula'))
+                    tables = list(tables.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_class']))\
+                                  .values('id', 'name', 'formula'))
+                    contracts = list(contracts.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_class']))\
+                                     .values('id', 'name', 'formula'))
+                else:
+                    current_class = request.GET['current_class'].lower()
+                    dicts = [{'id': d.id, 'name': d.name, 'formula': d.formula} for d in dicts if d.id == class_id or
+                             current_class in d.name.lower()]
+                    tables = [{'id': t.id, 'name': t.name, 'formula': t.formula} for t in tables if t.id == class_id or
+                             current_class in t.name.lower()]
+                    contracts = [{'id': c.id, 'name': c.name, 'formula': c.formula} for c in contracts if c.id == class_id or
+                             current_class in c.name.lower()]
+
             # Получим результирующий массив объектов
             result = []
             if request.GET['location'] in ('all', 'table'):
-                result.extend(list(tables.values('id', 'name', 'formula')))
+                result.extend(tables)
             if request.GET['location'] in ('all', 'contract'):
-                result.extend(list(contracts.values('id', 'name', 'formula')))
-            result.extend(list(dicts.values('id', 'name', 'formula')))
+                result.extend(contracts)
+            result.extend(dicts)
             if result:
                 for r in result:
                     r['formula'] = request.session['class_types'][r['formula']]
             result = json.dumps(result, ensure_ascii=False)
         else:
-            result = ''
+            result = '[]'
         return HttpResponse(result, content_type="application/json")
     except Exception as ex:
         return HttpResponse('Ошибка' + str(ex))
@@ -130,6 +144,7 @@ def get_classes(request):
 @view_procedures.is_auth
 def get_name(request):
     try:
+        is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
         class_types = request.session['class_types'].keys()
         # Работаем с классами
         if request.GET['current_name']:
@@ -140,37 +155,50 @@ def get_name(request):
             .annotate(parent_default=Subquery(dict_header.values('default')[:1]))
             tables = Designer.objects.exclude(formula__in=class_types).select_related('parent')
             contracts = Contracts.objects.exclude(formula__in=class_types).select_related('parent')
+            name_id = 0
             try:
-                class_id = int(request.GET['current_name'])
+                name_id = int(request.GET['current_name'])
             except ValueError:
-                dicts = dicts.filter(name__icontains=request.GET['current_name'])
-                tables = tables.filter(name__icontains=request.GET['current_name'])
-                contracts = contracts.filter(name__icontains=request.GET['current_name'])
-            else:
-                dicts = dicts.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_name']))
-                tables = tables.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_name']))
-                contracts = contracts.filter(Q(id=class_id) | Q(name__icontains=request.GET['current_name']))
-            if request.GET['location'] != 'all':
-                dicts = dicts.filter(parent_default=request.GET['location'])
-            # фильтруем по типу данных
-            if request.GET['type_class'] != 'all':
-                if request.GET['type_class'] == 'dict':
-                    contracts = contracts.filter(id=0)
-                    tables = tables.filter(id=0)
+                pass
+                # dicts = dicts.filter(name__icontains=request.GET['current_name'])
+                # tables = tables.filter(name__icontains=request.GET['current_name'])
+                # contracts = contracts.filter(name__icontains=request.GET['current_name'])
+            finally:
+                if request.GET['location'] != 'all':
+                    dicts = dicts.filter(parent_default=request.GET['location'])
+                if request.GET['type_class'] != 'all':
+                    if request.GET['type_class'] == 'dict':
+                        contracts = contracts.filter(id=0)
+                        tables = tables.filter(id=0)
+                    else:
+                        dicts = dicts.filter(id=0)
+                        tables = tables.filter(parent__formula=request.GET['type_class'])
+                        contracts = contracts.filter(parent__formula=request.GET['type_class'])
+                if is_mysql:
+                    dicts = list(dicts.filter(Q(id=name_id) | Q(name__icontains=request.GET['current_name']))\
+                                 .values('id', 'name', 'formula'))
+                    tables = list(tables.filter(Q(id=name_id) | Q(name__icontains=request.GET['current_name']))\
+                                  .values('id', 'name', 'formula'))
+                    contracts = list(contracts.filter(Q(id=name_id) | Q(name__icontains=request.GET['current_name']))\
+                                     .values('id', 'name', 'formula'))
                 else:
-                    dicts = dicts.filter(id=0)
-                    tables = tables.filter(parent__formula=request.GET['type_class'])
-                    contracts = contracts.filter(parent__formula=request.GET['type_class'])
+                    part_name = request.GET['current_name'].lower()
+                    dicts = [{'id': d.id, 'name': d.name, 'formula': d.formula} for d in dicts if d.id == name_id or \
+                             part_name in d.name.lower()]
+                    tables = [{'id': t.id, 'name': t.name, 'formula': t.formula} for t in tables if t.id == name_id or\
+                              part_name in t.name.lower()]
+                    contracts = [{'id': c.id, 'name': c.name, 'formula': c.formula} for c in contracts \
+                                 if c.id == name_id or part_name in c.name.lower()]
             # Получим результирующий массив объектов
             result = []
             if request.GET['location'] in ('all', 'table'):
-                result.extend(list(tables.values('id', 'name', 'formula')))
+                result.extend(tables)
             if request.GET['location'] in ('all', 'contract'):
-                result.extend(list(contracts.values('id', 'name', 'formula')))
-            result.extend(list(dicts.values('id', 'name', 'formula')))
+                result.extend(contracts)
+            result.extend(dicts)
             result = json.dumps(result, ensure_ascii=False)
         else:
-            result = ''
+            result = '[]'
         return HttpResponse(result, content_type="application/json")
     except Exception as ex:
         return HttpResponse('Ошибка' + str(ex))
@@ -192,6 +220,7 @@ def retreive_const_list(request):
 @view_procedures.is_auth
 @view_procedures.if_error
 def promp_link(request):
+    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     manager = Contracts.objects if request.GET['is_contract'] == 'true' else Designer.objects
     header = manager.get(id=request.GET['header_id'])
     parent_type, parent_id = convert_procedures.slice_link_header(header.value)
@@ -200,15 +229,20 @@ def promp_link(request):
     manager_parent_header = Contracts.objects if parent_type == 'contract' else Designer.objects
     parent_name = 'system_data' if parent_type == 'contract' else 'Наименование'
     parent_name_id = manager_parent_header.get(parent_id=parent_id, name=parent_name).id
+    code = 0
     if request.GET['link']:
         try:
             code = int(request.GET['link'])
         except ValueError:
-            parent_object = parent_object.filter(value__icontains=request.GET['link'])
-        else:
-            parent_object = parent_object.filter(Q(code=code) | Q(value__icontains=request.GET['link']))
+            pass
         finally:
-            result_codes = parent_object.values('code').distinct()
+            if is_mysql:
+                parent_object = parent_object.filter(Q(code=code) | Q(value__icontains=request.GET['link']))\
+                    .values('code').distinct()
+                result_codes = [p['code'] for p in parent_object]
+            else:
+                q_link = request.GET['link'].lower()
+                result_codes = list(set([po.code for po in parent_object if q_link in po.value.lower()]))
     else:
         result_codes = [p['code'] for p in parent_object.values('code').distinct()[:10]]
     parent_names = list(parent_object.filter(code__in=result_codes, name_id=parent_name_id).values('code', 'value'))
@@ -222,10 +256,10 @@ def promp_link(request):
 @view_procedures.is_auth
 @view_procedures.if_error
 def promp_direct_link(request):
+    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     class_manager = Contracts.objects if request.GET['location'] == 'c' else Designer.objects
     object_manager = ContractCells.objects if request.GET['location'] == 'c' else Objects.objects
     class_id = int(request.GET['class_id'])
-
     col_name = 'system_data' if request.GET['location'] == 'c' else 'Наименование'
     name_id = class_manager.filter(name=col_name, parent_id=class_id)
     if not name_id:
@@ -240,7 +274,11 @@ def promp_direct_link(request):
             if request.GET['location'] == 'c':
                 link_objects = link_objects.filter(value__datetime_create__icontains=request.GET['user_data'])
             else:
-                link_objects = link_objects.filter(value__icontains=request.GET['user_data'])
+                if is_mysql:
+                    link_objects = link_objects.filter(value__icontains=request.GET['user_data'])
+                else:
+                    user_data = request.GET['user_data'].lower()
+                    link_objects = [lo for lo in link_objects if user_data in lo.value.lower()]
         else:
             link_objects = link_objects.filter(code=obj_code)
     else:
@@ -258,22 +296,27 @@ def promp_direct_link(request):
 @view_procedures.is_auth
 @view_procedures.if_error
 def promp_owner(request):
+    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     dictionary = Dictionary.objects.get(id=int(request.GET['class_id']))
     manager = Objects.objects if dictionary.default == 'table' else ContractCells.objects
     objects = manager.filter(parent_structure_id=dictionary.parent_id)
-    objects = objects.filter(name__name__icontains='наименование') if dictionary.default == 'table'\
-        else objects.filter(name__name__icontains='дата и время записи')
+    objects = objects.filter(name__name__icontains='Наименование') if dictionary.default == 'table'\
+        else objects.filter(name__name__icontains='Дата и время записи')
     if request.GET['link']:
+        code = 0
         try:
             code = int(request.GET['link'])
         except ValueError:
-            objects = objects.filter(value__icontains=request.GET['link'])
-        else:
-            objects = objects.filter(Q(code=code) | Q(value__icontains=request.GET['link']))
-        result_codes = objects.values('code').distinct()
+            pass
+        finally:
+            if is_mysql:
+                objects = objects.filter(Q(code=code) | Q(value__icontains=request.GET['link']))
+                result_codes = objects.values('code').distinct()
+            else:
+                my_link = request.GET['link'].lower()
+                result_codes = list(set([o.code for o in objects if o.code == code or my_link in o.value.lower()]))
     else:
         result_codes = [o['code'] for o in objects.values('code').distinct()[:10]]
-
     parent_names = manager.filter(parent_structure_id=dictionary.parent_id)
     name_main_field = 'Наименование' if dictionary.default == 'table' else 'Дата и время записи'
     parent_names = parent_names.filter(code__in=result_codes, name__name__icontains=name_main_field)

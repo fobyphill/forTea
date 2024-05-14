@@ -1,10 +1,9 @@
-<div class="col-6">
+<div class="col-6 h-100 overflow-auto">
     {# Черновики #}
     {% if objects.0.type == 'table' %}
         <div class="tag-invis" id="d_drafts">
             <span class="input-group-text">Черновики</span>
-            <select class="form-control" id="s_draft_vers" name="s_draft_vers"
-                    onchange="select_draft(this)"></select>
+            <select class="form-control" id="s_draft_vers" name="s_draft_vers" onchange="select_draft(this)"></select>
         </div>
     {% endif %}
     {# Ползунок истории #}
@@ -54,15 +53,18 @@
                         {{ h.name }}
                     </a>
                 </span>
-                <button class="badge label-prop-name" style="border: 0" data-toggle="modal" data-target="#myModal">Редактировать</button>
+                <button class="badge label-prop-name" style="border: 0" data-toggle="modal"
+                        data-target="#myModal{{ h.id }}" type="button">Редактировать</button>
             </div>
-            <div class="modal fade" id="myModal" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true">
+            {# модальное окно с табличной частью объекта #}
+            <div class="modal fade" id="myModal{{ h.id }}" tabindex="-1" role="dialog" aria-labelledby="myModalLabel"
+                 aria-hidden="true">
                 <div class="modal-dialog modal-xl">
                     <div class="modal-content">
                         <div class="modal-header">
                             <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
                         </div>
-                        <div class="modal-body">
+                        <div class="modal-body" style="padding: 0">
                             <iframe id="iframe_{{ h.id }}" width="100%" height="600" scrolling="yes" loading="lazy"
                                 sandbox="allow-same-origin allow-modals allow-scripts allow-forms" frameborder="0"
                             src="{{ request.path }}?class_id={{ h.id }}&input_owner=">
@@ -70,11 +72,12 @@
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-default" name="close-btn"
-                                onclick="ref_page()" data-dismiss="modal">Закрыть</button>
+                                onclick="change_timeline_interval(true)" data-dismiss="modal">Закрыть</button>
                         </div>
                     </div>
                 </div>
             </div>
+            {# таблица массива #}
             <div style="border: 1px solid #ced4da; border-radius: 0.25rem;" class="mb-3">
                 <div id="div_table_slave_{{ h.id }}">
                     {% include 'objects/array-table.html' %}
@@ -84,7 +87,7 @@
             {# Заголовок поля #}
             <div style="margin: 0 0 -0.5rem 1.2rem">
                 <span class="badge label-prop-name"><a target="_blank" id="a_label_{{ h.id }}">{{ h.name }}</a></span>
-                {% if h.is_required and h.name != 'Дата и время записи' %}<span class="text-red">*</span>{% endif %}
+                {% if h.is_required %}<span class="text-red">*</span>{% endif %}
             </div>
             <div class="input-group-text mb-1" style="white-space: normal">
                 {% if h.formula == 'float' %}
@@ -372,12 +375,11 @@
             <button type="button" class="btn btn-primary" style="background-color: #195fb2;
             border-color: #195fb2; min-width: 100px" onclick="new_obj()">
                 Новый</button>
-            <button type="button" class="btn btn-primary" style="background-color: #195fb2;
-            border-color: #195fb2; min-width: 100px"
-                    onclick="send_form_with_param('b_save')" id="b_save">
+            <button type="button" class="btn btn-primary" style="background-color: #195fb2; border-color: #195fb2;
+            min-width: 100px" onclick="pack_search();send_form_with_param('b_save')" id="b_save">
                 Сохранить</button>
         {% if objects.0.type == 'table' or objects.0.type == 'contract' %}
-            <button type="button" class="btn btn-secondary" onclick="send_form_with_param('b_draft')">
+            <button type="button" class="btn btn-secondary" onclick="pack_search();send_form_with_param('b_draft')">
                 В черновик</button>
         {% endif %}
             <button type="button" class="btn btn-danger" style="min-width: 100px" id="b_delete_object"

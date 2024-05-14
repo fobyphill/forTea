@@ -1,0 +1,170 @@
+<div class="d-block mb-3">
+    <div class="dropdown d-flex flex-row">
+        <div class="p-2">Поиск</div>
+        <div class="w-auto d-inline border border-info rounded d-flex flex-row"
+             style="min-width: 15rem; min-height: 2.4rem" type="button" id="div_search_results"
+             data-toggle="dropdown" aria-haspopup="true" aria-expanded="false"></div>
+        <div class="dropdown-menu overflow-auto" aria-labelledby="dropdownMenuButton" style="max-height: 70vh; width: 30%">
+            <div class="dropdown-item input-group p-1">
+                <span class="input-group-text border-0 bg-transparent text-left">Код</span>
+                <input class="form-control" id="sfcode" oninput="change_search(this)" type="number">
+            </div>
+            <div class="dropdown-divider"></div>
+            <div id="div_other_search_filters">
+            {% for h in headers %}
+                {% if h.formula != 'eval' and h.formula != 'array' %}
+                    <div class="dropdown-item input-group p-1">
+                        {% if h.name == 'system_data' and db_loc == 'c' %}
+                            <span class="input-group-text border-0 bg-transparent text-left">Дата и время создания</span>
+                            <select class="border border-light" id="sfsigndtc"
+                                onchange="change_search($('#sfdtc')[0]);" onclick="event.stopPropagation()">
+                                <option value="=">=</option>
+                                <option value=">">&gt;</option>
+                                <option value="<">&lt;</option>
+                                <option value=">=">&gt;&equals;</option>
+                                <option value="<=">&lt;&equals;</option>
+                                <option value="<>">&lt;&gt;</option>
+                            </select>
+                            <input class="form-control" id="sfdtc" type="datetime-local" step="1" onchange="change_search(this)">
+                        {% else %}
+                            <span class="input-group-text border-0 bg-transparent text-left">{{ h.name }}</span>
+                            {% if h.formula == 'enum' %}
+                                <select class="form-control" onclick="event.stopPropagation()",
+                                        onchange="change_search(this)" id="sf{{ h.id }}">
+                                    <option selected disabled hidden></option>
+                                {% if db_loc == 'd' %}
+                                    {% for sel_val in h.default %}
+                                        <option>{{ sel_val }}</option>
+                                    {% endfor %}
+                                {% else %}
+                                    {% for sel_val in h.value %}
+                                        <option>{{ sel_val }}</option>
+                                    {% endfor %}
+                                {% endif %}
+                                </select>
+                            {% elif h.formula == 'const' %}
+                                <select class="form-control" onclick="event.stopPropagation()"
+                                        id="sf{{ h.id }}" oninput="ras(this)", onchange="change_search(this)">
+                                {% for const_id in h.const %}
+                                    <option value="{{ const_id.id }}">{{ const_id.name }}</option>
+                                {% endfor %}
+                                </select>
+                                <div class="form-control" id="da_sf{{ h.id }}"></div>
+                            {% else %}
+                                {% if h.formula in 'float,date,datetime' %}
+                                    <select class="border border-light" id="sfsign{{ h.id }}"
+                                            onchange="change_search($('#sf{{ h.id }}')[0]);" onclick="event.stopPropagation()">
+                                        <option value="=">=</option>
+                                        <option value=">">&gt;</option>
+                                        <option value="<">&lt;</option>
+                                        <option value=">=">&gt;&equals;</option>
+                                        <option value="<=">&lt;&equals;</option>
+                                        <option value="<>">&lt;&gt;</option>
+                                    </select>
+                                {% endif %}
+                                <input class="form-control" id="sf{{ h.id }}"
+                                       oninput="change_search(this){% if h.formula == 'link' %}; glas(this, '{{ db_loc }}');
+                                           {% if db_loc == 'd' %}sdlp(this){% else %}pls(this){% endif %}{% endif %}"
+                                {% if h.formula == 'bool' %}
+                                       type="checkbox"
+                                {% elif h.formula == 'float' %}
+                                    type="number"
+                               {% elif h.formula == 'date' %}
+                                    type="date"
+                                {% elif h.formula == 'datetime' %}
+                                    type="datetime-local"
+                                {% endif %}
+                                {% if h.formula == 'link' %}
+                                   list="dl_sf{{ h.id }}" style="width: fit-content;"
+                                {% endif %}>
+                            {% endif %}
+                            {% if h.formula == 'link' %}
+                                <datalist id="dl_sf{{ h.id }}"></datalist>
+                                <span class="input-group-text" id="link_sf{{ h.id }}">
+                                    <a target="_blank"
+    href="{% if h.value.0 == 't' %}manage-object{% else %}contract{% endif %}?class_id={% if is_contract == 'true' %}
+    {{ h.value|slice:'9:' }}{% else %}{{ h.value|slice:'6:' }}{% endif %}">Перейти к объектам родителя</a>
+                                </span>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+            {% if request.session.temp_object_manager.arrays %}
+                <div class="dropdown-divider"></div>
+                <span class="font-weight-bold font-italic">Массивы</span>
+            {% endif %}
+            {% for array in request.session.temp_object_manager.arrays %}
+                <div class="dropdown-item input-group p-1">
+                    <span class="input-group-text border-0 bg-transparent text-left">{{ array.name }}</span>
+                    <span class="badge">Включить</span>
+                    <input class="form-control" type="checkbox" style="height: 1rem" onclick="aha(this)"
+                           id="chb_switcher{{ array.id }}">
+                </div>
+                <div id="divarsf{{ array.id }}" class="tag-invis">
+                    {% for h in array.headers %}
+                        {% if h.formula != 'eval' and h.name != 'Собственник' %}
+                            <div class="dropdown-item input-group p-1">
+                                <span class="input-group-text border-0 bg-transparent text-left">{{ h.name }}</span>
+                                {% if h.formula == 'enum' %}
+                                    <select class="form-control" onclick="event.stopPropagation()",
+                                            onchange="change_search(this)" id="ar{{ array.id }}sf{{ h.id }}">
+                                        <option selected disabled hidden></option>
+                                        {% for sel_val in h.value %}
+                                            <option>{{ sel_val }}</option>
+                                        {% endfor %}
+                                    </select>
+                                {% elif h.formula == 'const' %}
+                                    <select class="form-control" onclick="uch(this, '{{ db_loc }}'), event.stopPropagation()"
+                                        id="ar{{ array.id }}sf{{ h.id }}" onchange="change_search(this); ras(this)">
+                                    </select>
+                                    <div class="form-control" id="da_sf{{ h.id }}"></div>
+                                {% else %}
+                                    {% if h.formula in 'float,date,datetime' %}
+                                        <select class="border border-light" id="ar{{ array.id }}sfsign{{ h.id }}"
+                                                onchange="change_search($('#ar{{ array.id }}sf{{ h.id }}')[0]);"
+                                                onclick="event.stopPropagation()">
+                                            <option value="=">=</option>
+                                            <option value=">">&gt;</option>
+                                            <option value="<">&lt;</option>
+                                            <option value=">=">&gt;&equals;</option>
+                                            <option value="<=">&lt;&equals;</option>
+                                            <option value="<>">&lt;&gt;</option>
+                                        </select>
+                                    {% endif %}
+                                    <input class="form-control" id="ar{{ array.id }}sf{{ h.id }}"
+                                           oninput="change_search(this){% if h.formula == 'link' %}; glas(this, '{{ db_loc }}');
+                                               {% if db_loc == 'd' %}sdlp(this){% else %}pls(this){% endif %}{% endif %}"
+                                    {% if h.formula == 'bool' %}
+                                           type="checkbox"
+                                    {% elif h.formula == 'float' %}
+                                        type="number"
+                                   {% elif h.formula == 'date' %}
+                                        type="date"
+                                    {% elif h.formula == 'datetime' %}
+                                        type="datetime-local" step="1"
+                                    {% endif %}
+                                    {% if h.formula == 'link' %}
+                                       list="dl_sf{{ h.id }}" style="width: fit-content;"
+                                    {% endif %}>
+                                {% endif %}
+                                {% if h.formula == 'link' %}
+                                    <datalist id="dl_sf{{ h.id }}"></datalist>
+                                    <span class="input-group-text" id="link_sf{{ h.id }}">
+                                        <a target="_blank"
+                                           href="{% if h.value.0 == 't' %}manage-object{% else %}contract{% endif %}?class_id=
+                                            {% if is_contract == 'true' %}{{ h.value|slice:'9:' }}{% else %}{{ h.value|slice:'6:' }}
+                                            {% endif %}">Перейти к объектам родителя</a>
+                                    </span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            {% endfor %}
+            </div>
+        </div>
+        <input type="button" value="Найти" class="btn btn-outline-primary"
+               style="vertical-align: top; width: 130px;" onclick="pack_search();$('#page').val(1);this.form.submit()">
+    </div>
+</div>

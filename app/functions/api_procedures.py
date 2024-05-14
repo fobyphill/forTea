@@ -58,11 +58,15 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
         elif current_class.formula == 'tree':
             header_param = next(cp for cp in class_params if cp['name'] == 'parent')
     elif k.lower() == 'owner':
-        try:
-            header_param = next(cp for cp in class_params if cp['name'] == 'Собственник')
-        except StopIteration:
-            if not current_class.formula == 'dict' and current_class.parent_id == int(v):
-                return 'Ошибка. Собственника необходимо указывать только для классов с собственниками - массив, словарь'
+        if current_class.formula in ('dict', 'array'):
+            try:
+                int(v)
+            except ValueError:
+                return 'Ошибка. Некорректно задан параметр "owner" - собственник. Укажите целое число'
+            else:
+                return ''
+        else:
+            return 'Ошибка. Собственника необходимо указывать только для классов с собственниками - массив, словарь'
     elif k.lower() == 'name':
         return ''
 

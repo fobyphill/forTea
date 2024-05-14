@@ -16,6 +16,7 @@ from app.functions import view_procedures, interface_funs, convert_funs, session
 from app.models import TableDrafts, Designer, ContractDrafts, Contracts, ContractCells, Objects, TechProcess, \
     RegistratorLog, TechProcessObjects, DictObjects, Dictionary, MainPageConst
 from django.contrib.auth import get_user_model
+from forteatoo.settings import DATABASES as dbses
 
 
 @view_procedures.is_auth
@@ -76,6 +77,7 @@ def retreive_object_drafts(request):
 def get_users(request):
     User = get_user_model()
     user_data = request.GET['user_data']
+    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     if user_data:
         try:
             user_id = int(request.GET['user_data'])
@@ -84,9 +86,15 @@ def get_users(request):
             user_data = user_data.split(' ')
         else:
             user_data = (user_data, )
-        q = Q(id=user_id) | reduce(operator.or_, (Q(username__icontains=x) | Q(first_name__icontains=x) |
-                                                  Q(last_name__icontains=x) for x in user_data))
-        recepients = list(User.objects.filter(q).values('id', 'username', 'first_name', 'last_name'))
+        if is_mysql:
+            q = Q(id=user_id) | reduce(operator.or_, (Q(username__icontains=x) | Q(first_name__icontains=x) |
+                                                      Q(last_name__icontains=x) for x in user_data))
+            recepients = list(User.objects.filter(q).values('id', 'username', 'first_name', 'last_name'))
+        else:
+            user_data = user_data.lower()
+            recepients = [u for u in User.objects.all().values('id', 'username', 'first_name', 'last_name') \
+                          if u['id'] == user_id or user_data in u['username'].lower() \
+                          or user_data in u['first_name'].lower() or user_data in u['last_name'].lower()]
     else:
         recepients = list(User.objects.filter(is_active=True).values('id', 'username', 'first_name', 'last_name'))[:10]
     return HttpResponse(json.dumps(recepients, ensure_ascii=False), content_type="application/json")
@@ -122,9 +130,9 @@ def get_business_rule(request):
         excl_names = ('business_rule', 'link_map', 'trigger')
         headers = Contracts.objects.filter(parent_id=class_id).exclude(name__in=excl_names).values()
     biz_rule = Contracts.objects.filter(parent_id=class_id, name='business_rule').values()[0]
-    my_tps = request.session['temp_object_manager']['my_tps'] if 'my_tps' in request.session['temp_object_manager'] else None
+    my_tps = request.session['temp_object_manager']['tps'] if 'tps' in request.session['temp_object_manager'] else None
     old_obj = ContractCells.objects.filter(parent_structure_id=class_id, code=code)
-    presaved_object = app.functions.interface_procedures.mofr(code, class_id, headers, request.GET, old_obj, True)
+    presaved_object = app.functions.interface_procedures.mofr(code, class_id, headers, request.GET, old_obj, True, tps=my_tps)
     result = app.functions.contract_funs.do_business_rule(biz_rule, presaved_object, request.user.id)
     return HttpResponse(json.dumps(result, ensure_ascii=False), content_type="application/json")
 
@@ -133,18 +141,28 @@ def get_business_rule(request):
 @view_procedures.if_error
 # gc4lp = get classes for link promp
 def gc4lp(request):
+    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     manager = Contracts.objects if request.GET['class_type'] == 'contract' else Designer.objects
+    base_classes = manager.filter(formula=request.GET['class_type'])
     if request.GET['class_val']:
-        classes = manager.filter(name__icontains=request.GET['class_val'], formula=request.GET['class_type'])
-        try:
-            class_id = int(request.GET['class_val'])
-        except ValueError:
-            pass
+        if is_mysql:
+            classes = base_classes.filter(name__icontains=request.GET['class_val']).values('id', 'name')
+            try:
+                class_id = int(request.GET['class_val'])
+            except ValueError:
+                pass
+            else:
+                classes = list(classes.union(base_classes.filter(id=class_id).values('id', 'name')))
         else:
-            classes = classes.union(manager.filter(id=class_id, formula=request.GET['class_type']))
+            class_id = 0
+            try:
+                class_id = int(request.GET['class_val'])
+            except ValueError:
+                pass
+            val = request.GET['class_val'].lower()
+            classes = [bc for bc in base_classes.values('id', 'name') if bc['id'] == class_id or val in bc['name'].lower()]
     else:
-        classes = manager.filter(formula=request.GET['class_type'])[:10]
-    classes = list(classes.values('id', 'name'))
+        classes = list(base_classes.values('id', 'name')[:10])
     return HttpResponse(json.dumps(classes, ensure_ascii=False), content_type="application/json")
 
 
@@ -154,7 +172,7 @@ def gc4lp(request):
 def gon4d(request):
     is_contract = True if request.GET['link_type'] == 'contract' else False
     manager = ContractCells.objects if is_contract else Objects.objects
-    req_field = 'Дата и время записи' if is_contract else 'Наименование'
+    req_field = 'system_data' if is_contract else 'Наименование'
     objs = manager.filter(name__name=req_field, parent_structure_id=request.GET['link_id']).values('code', 'value')
     if request.GET['code']:
         try:
@@ -165,7 +183,10 @@ def gon4d(request):
             objs = objs.filter(code=code)
     else:
         objs = objs[:10]
-    objs = list(objs)
+    if is_contract:
+        objs = [{'code': o['code'], 'value': o['value']['datetime_create']} for o in objs]
+    else:
+        objs = list(objs)
     return HttpResponse(json.dumps(objs, ensure_ascii=False), content_type="application/json")
 
 
@@ -266,3 +287,15 @@ def cmpf(request):
         convert_funs.deep_formula(our_const, (our_const, ), request.user.id)
         result = our_const[our_const['id']]['value']
     return HttpResponse(json.dumps(result, ensure_ascii=False), content_type="application/json")
+
+
+
+@view_procedures.is_auth
+def uch(request):
+    header_id = int(request.GET['header_id'])
+    manager = Contracts.objects if request.GET['loc'] == 'c' else Designer.objects
+    header = manager.get(id=header_id)
+    child_manager = Contracts.objects if header.value[0] == 'c' else Designer.objects
+    const_id = re.search(r'(?:contract|table)\.(\d+)', header.value)[1]
+    const = list(child_manager.filter(parent_id=int(const_id)).values('id', 'name'))
+    return HttpResponse(json.dumps(const, ensure_ascii=False), content_type="application/json")

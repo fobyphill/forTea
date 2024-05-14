@@ -1,17 +1,19 @@
 import copy
-import json, shutil
-import operator
+import json
 import os
 import re
 from datetime import datetime
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
-from django.db.models import Q, OuterRef, Subquery, F
+from django.db.models import Q, OuterRef, Subquery, F, FloatField, CharField, DateTimeField, ExpressionWrapper, Func, \
+    Value
+from django.db.models.functions import Cast
 from django.forms import model_to_dict
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.utils.encoding import iri_to_uri
+from forteatoo.settings import DATABASES as dbses
 
 import app.functions.files_funs
 import app.functions.reg_funs
@@ -259,7 +261,7 @@ def delete_dict_param(request, message):
 
 
 # Обновить / создать словарь. Выход Да - были изменения. Нет - не сохранено.
-def save_dict(request, parent_code, parent_transact_id=None, timestamp=None):
+def save_dict(request, code, parent_transact_id=None, timestamp=None):
     is_save = False
     for k, v in request.POST.items():
         if re.match(r'^dict_info.+$', k) and v:
@@ -267,14 +269,12 @@ def save_dict(request, parent_code, parent_transact_id=None, timestamp=None):
             if len(json_dict) <= 1:
                 continue
             parent_id = int(re.search(r'^dict_info(?P<id>\d+)$', k).group('id'))
-            dict_objects = DictObjects.objects.filter(parent_structure_id=parent_id, parent_code=parent_code).select_related('name')
+            dict_objects = DictObjects.objects.filter(parent_structure_id=parent_id, code=code).select_related('name')
             dict_header = Dictionary.objects.get(id=parent_id)
             dict_objects_upd = []
-            reg_general_data = {'class_id': parent_id, 'type': 'dict', 'location': dict_header.default,
-                                'parent_code': parent_code}
+            reg_general_data = {'class_id': parent_id, 'type': 'dict', 'location': dict_header.default}
             if not timestamp:   timestamp = datetime.now()
             if dict_objects:
-                code = dict_objects[0].code
                 transact_id = reg_funs.get_transact_id(parent_id, code, 'd')
                 for do in dict_objects:
                     if do.value != json_dict[str(do.name_id)]:
@@ -310,8 +310,7 @@ def save_dict(request, parent_code, parent_transact_id=None, timestamp=None):
                     del json_dict['id']
 
                     for k, v in json_dict.items():
-                        new_req = DictObjects(value=v, code=code, parent_code=parent_code, name_id=int(k),
-                                              parent_structure_id=parent_id)
+                        new_req = DictObjects(value=v, code=code, name_id=int(k), parent_structure_id=parent_id)
                         new_req.save()
                         # Регистрация
                         oc = reg_general_data.copy()
@@ -322,7 +321,6 @@ def save_dict(request, parent_code, parent_transact_id=None, timestamp=None):
                         reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, parent_transact_id, **reg)
             # Новый словарь
             else:
-                code = database_funs.get_code(parent_id, 'dict')
                 transact_id = reg_funs.get_transact_id(parent_id, code, 'd')
                 # регистрация создания словаря
                 outcoming = reg_general_data.copy()
@@ -331,14 +329,13 @@ def save_dict(request, parent_code, parent_transact_id=None, timestamp=None):
                 reg_funs.simple_reg(request.user.id, 5, timestamp, transact_id, parent_transact_id, **reg)
                 for kk, vv in json_dict.items():
                     if kk != 'id':
-                        new_dict_rec = DictObjects(name_id=int(kk), parent_code=parent_code, parent_structure_id=parent_id,
-                                                   code=code, value=vv)
+                        new_dict_rec = DictObjects(name_id=int(kk), code=code, parent_structure_id=parent_id,
+                                                   value=vv)
                         dict_objects_upd.append(new_dict_rec)
                 if dict_objects_upd:
                     is_save = True
                     DictObjects.objects.bulk_create(dict_objects_upd)
-                    new_dict_params = DictObjects.objects.filter(code=code, parent_code=parent_code,
-                                                                 parent_structure_id=parent_id)
+                    new_dict_params = DictObjects.objects.filter(code=code, parent_structure_id=parent_id)
                     for ndp in new_dict_params:
                         oc = outcoming.copy()
                         ndp = model_to_dict(ndp)
@@ -459,12 +456,11 @@ def make_graft(request, code, is_contract=False):
     if is_contract:
         datetime_record_head = Contracts.objects.get(parent_id=class_id, name='system_data')
         if code:
-            datetime_record = ContractCells.objects.filter(parent_structure_id=class_id, code=code,
-                                                           name__name=datetime_record_head.id).get()
+            datetime_record = ContractCells.objects.filter(parent_structure_id=class_id, code=code, name_id=datetime_record_head.id).get()
             val = datetime_record.value
         else:
             val = None
-        draft[datetime_record_head.name_id] = {'value': val}
+        draft[datetime_record.name_id] = {'value': val}
     if 'i_branch' in request.POST and request.POST['i_branch']:
         draft['branch'] = int(request.POST['i_branch'])
     for k, v in request.POST.items():
@@ -1047,8 +1043,7 @@ def stpirt(prop, new_val, user_id, timestamp, is_contract=False):
     return is_saved
 
 
-def check_branch(request, tree_id, is_contract=False):
-    branch_code = int(request.POST['branch_code'])
+def check_branch(request, tree_id, branch_code, is_contract=False):
     tree = request.session['temp_object_manager']['tree']
     branch = tree_funs.find_branch(tree, 'code', branch_code)
     request.session['temp_object_manager']['active_branch'] = branch
@@ -1079,21 +1074,7 @@ def check_branch(request, tree_id, is_contract=False):
                 branch['children'] = tree_funs.get_branch_props(branch['children'], tree_id,
                                                                 request.session['temp_object_manager']['tree_headers'],
                                                                 request.user.id, is_contract, child_class=int(request.GET['class_id']))
-    return branch_code, tree, branch
-
-
-def branch_objects_codes(branch, class_id, is_contract=False):
-    class_manager = Contracts.objects if is_contract else Designer.objects
-    object_manager = ContractCells.objects if is_contract else Objects.objects
-    parent_branch = class_manager.get(parent_id=class_id, name='parent_branch')
-    if not branch or branch['code'] == 0:
-        non_codes = object_manager.filter(parent_structure_id=class_id, name_id=parent_branch.id, value__isnull=False)\
-        .values('code')
-        codes = object_manager.filter(parent_structure_id=class_id).exclude(code__in=Subquery(non_codes))\
-            .values('code').distinct()
-    else:
-        codes = object_manager.filter(parent_structure_id=class_id, name_id=parent_branch.id, value=branch['code']).values('code')
-    return codes.order_by('-code')
+    return branch
 
 
 def save_contract_object(request, code, current_class, class_params, **params):
@@ -1107,7 +1088,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
     is_valid = True
     # Проверим базовые бизнес-правила для техпроцессов
     change_tps = False
-    my_tps = None
+    my_tps = {}
     tps_all = {}
     tps = request.session['temp_object_manager']['tps']
     control_fields = [t['cf'] for t in tps]
@@ -1119,6 +1100,14 @@ def save_contract_object(request, code, current_class, class_params, **params):
             objects = ContractCells.objects.filter(code=code, parent_structure_id=current_class.id).select_related('name')
             is_valid, message = contract_validation(class_params, current_class, request, objects)
             tps_all, change_tps, tps_valid, msg = interface_procedures.check_changes_tps(tps, code, request.POST)
+            if change_tps:
+                for tak, tav in tps_all.items():
+                    if tav['changed']:
+                        dict_tp = {}
+                        for nsk, nsv in tav['new_stages'].items():
+                            old_stage = next(osv for osk, osv in tav['old_stages'].items() if osk == nsk)
+                            dict_tp[nsk] = {'state': nsv['value'], 'fact': old_stage['fact'], 'delay': nsv['value'] - old_stage['fact']}
+                        my_tps[tak] = dict_tp
             is_valid = is_valid and tps_valid
 
             if msg:
@@ -1158,16 +1147,17 @@ def save_contract_object(request, code, current_class, class_params, **params):
                     except StopIteration:
                         o = ContractCells(name_id=field_id, parent_structure_id=current_class.id,
                                           code=code)
+                    current_param = next(cp for cp in class_params if cp['id'] == field_id)
                     # Проверим делэйные значения
                     delay_value, date_delay_value = interface_procedures.check_delay_value(request, field_id, k)
                     v = view_procedures.convert_in_json(k, v)  # Конвертация формата
-                    edit_dict[k] = 0 if type(v) in (float, int) else v
+                    edit_dict[k] = 0 if current_param['formula'] == 'float' else v
                     is_change = False
                     if o.value != v or date_delay_value:
                         # Для массива не будем сохранять изменение собственника
-                        if o.name.name == 'Собственник' and current_class.formula == 'array':
+                        if current_param['name'] == 'Собственник' and current_class.formula == 'array':
                             continue
-                        current_param = next(cp for cp in class_params if cp['id'] == field_id)
+
                         json_object = {}
                         if o.value != v:
                             is_change = True
@@ -1703,7 +1693,6 @@ def get_new_tps(item_code, tps):
     return list_tps
 
 
-
 # ccv - create_class_validation
 # вход: message. Если все ок. то message = ok. если нет - текст ошибки.
 def ccv(class_name, class_type, class_types, parent_id, location='t', **params):
@@ -1943,129 +1932,6 @@ def ccpv(class_id, class_type, location, param_name, param_type, **params):
     return 'ok'
 
 
-# spot = save params of tp - Можно удалить после 20.04.2024
-# def spot(tp_id, user_id, **params):
-#     # верификация
-#     try:
-#         tp = TechProcess.objects.get(id=tp_id)
-#     except ObjectDoesNotExist:
-#         return 'Некорректно указано ID техпроцесса<br>'
-#     # проверим контрольное поле
-#     change_cf = False  # переменная включается один раз. Во время инициализации контрольного поля техпроцессов
-#     # Изменить контрольное поле можно, но один раз - с пустого на непустой
-#     if not tp.value['control_field'] and 'control_field' in params and params['control_field']:
-#         change_cf = True
-#         try:
-#             Contracts.objects.get(parent_id=tp.parent_id, id=params['control_field'], formula='float')
-#         except (ObjectDoesNotExist, MultipleObjectsReturned):
-#             return 'Некорректно указан ID контрольного поля<br>'
-#     # проверим стадии
-#     change_stages = False
-#     if 'stages' in params:
-#         old_stages = TechProcess.objects.get(name='stages', parent_id=tp_id)
-#         if old_stages.value != params['stages']:
-#             change_stages = True
-#             if not type(params['stages']) is list:
-#                 return 'Некорректно заданы стадии техпроцесса. Укажите стадии в виде списка строк<br>'
-#     if 'link_map' in params:
-#         old_lm = TechProcess.objects.get(name='link_map', parent_id=tp_id)
-#         if old_lm.value != params['link_map']:
-#             interface_procedures.iscrh(tp_id, old_lm.value, params['link_map'])
-#             err_text = 'Некорректно заданы ЛинкМап. Укажите в виде списка словарей, ' \
-#                        'где у словаря следующая структура: {name: str, handler: int, children: list}. ' \
-#                        'Названия стадий не должны повторяться. Handler - это ID ответственного пользователя,' \
-#                        ' children - список стадий, в которые возможно движение с данной стадии<br>'
-#             for lm in params['link_map']:
-#                 # Проверка структуры
-#                 if not ('name' in lm and 'handler' in lm and 'children' in lm):
-#                     return err_text
-#                 # Проверка повторимости имен
-#                 if lm['name'] in [lmlm['name'] for lmlm in params['link_map'] if params['link_map'].index(lmlm) !=
-#                                                                                  params['link_map'].index(lm)]:
-#                     return err_text
-#                 # Проверка ответственных
-#                 if lm['handler'] and not type(lm['handler']) is int:
-#                     return err_text
-#                 if lm['handler'] and not get_user_model().objects.filter(id=lm['handler']):
-#                     return err_text
-#                 # Проверка детей
-#                 if not type(lm['children']) is list:
-#                     return err_text
-#                 lnwc = [s for s in params['stages'] if s != lm['name']]  # list names without current
-#                 for c in lm['children']:
-#                     if c not in lnwc:
-#                         return  err_text
-#
-#     timestamp = params['timestamp'] if 'timestamp' in params else datetime.today()
-#     transact_id = reg_funs.get_transact_id(tp_id, 0, 'p')
-#     parent_transact = params['parent_transact'] if 'parent_transact' in params else None
-#     # Сохраним изменения
-#     is_change = False
-#     if change_cf:
-#         is_change = True
-#         inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'control_field': tp.value['control_field']}
-#         outc = inc.copy()
-#         outc['control_field'] = params['control_field']
-#         tp.value['control_field'] = params['control_field']
-#         tp.save()
-#         reg = {'json': outc, 'json_income': inc}
-#         reg_funs.simple_reg(user_id, 3, timestamp, transact_id, parent_transact, **reg)
-#     if change_stages:
-#         is_change = True
-#         inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_stages.id, 'name': 'stages',
-#                'value': old_stages.value}
-#         outc = inc.copy()
-#         outc['value'] = params['stages']
-#         old_stages.value = params['stages']
-#         old_stages.save()
-#         reg = {'json': outc, 'json_income': inc}
-#         reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-#     if 'business_rule' in params:
-#         old_br = TechProcess.objects.get(name='business_rule', parent_id=tp_id)
-#         if old_br.value != params['business_rule']:
-#             is_change = True
-#             inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_br.id,
-#                    'name': 'business_rule', 'value': old_br.value}
-#             outc = inc.copy()
-#             outc['value'] = params['business_rule']
-#             old_br.value = params['business_rule']
-#             old_br.save()
-#             reg = {'json': outc, 'json_income': inc}
-#             reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-#     if 'link_map' in params:
-#         old_lm = TechProcess.objects.get(name='link_map', parent_id=tp_id)
-#         if old_lm.value != params['link_map']:
-#             is_change = True
-#             # Если имя было изменено, исправим это имя везде в истории
-#
-#             inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_lm.id,
-#                    'name': 'link_map', 'value': old_lm.value}
-#             outc = inc.copy()
-#             outc['value'] = params['link_map']
-#             old_lm.value = params['link_map']
-#             old_lm.save()
-#             reg = {'json': outc, 'json_income': inc}
-#             reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-#     if 'trigger' in params:
-#         old_tr = TechProcess.objects.get(name='trigger', parent_id=tp_id)
-#         if old_tr.value != params['trigger']:
-#             is_change = True
-#             inc = {'class_id': tp_id, 'location': 'contract', 'type': 'techprocess', 'id': old_tr.id,
-#                    'name': 'trigger', 'value': old_tr.value}
-#             outc = inc.copy()
-#             outc['value'] = params['trigger']
-#             old_tr.value = params['trigger']
-#             old_tr.save()
-#             reg = {'json': outc, 'json_income': inc}
-#             reg_funs.simple_reg(user_id, 10, timestamp, transact_id, parent_transact, **reg)
-#     result = 'ok' if is_change else 'Вы ничего не изменили<br>'
-#     # Если была инициализация контрольного поля техпроцесса - заполним объекты техпроцессов для всех объектов контрактов
-#     if change_cf:
-#         cells = ContractCells.objects.filter(parent_structure_id=tp.parent_id, name_id=tp.value['control_field'])
-#         for c in cells:
-#             interface_procedures.mtp(c, old_stages)
-#     return result
-
 def valid_api_data(request):
     is_valid = True
     message = ''
@@ -2098,3 +1964,189 @@ def valid_api_data(request):
             message += 'Некорректно указано расположение объекта. Задайте параметр location одним из следующих значений: ' \
                        'table, contract, dict, tp. '
     return is_valid, message, class_id, code, location
+
+
+# sandf = search and filter
+def sandf(request, query, headers, tree=None, branch=None):
+    def filter_float(query, my_dict):
+        if my_dict['sign'] == '=':
+            float_query = Q(float_val=my_dict['value'])
+        elif my_dict['sign'] == '<>':
+            float_query = ~Q(float_val=my_dict['value'])
+        elif my_dict['sign'] == '>':
+            float_query = Q(float_val__gt=my_dict['value'])
+        elif my_dict['sign'] == '<':
+            float_query = Q(float_val__lt=my_dict['value'])
+        elif my_dict['sign'] == '>=':
+            float_query = Q(float_val__gte=my_dict['value'])
+        else:
+            float_query = Q(float_val__lte=my_dict['value'])
+        return query.filter(float_query)
+
+    def filter_dates(query, my_dict):
+        if my_dict['sign'] == '=':
+            query = query.filter(unq_val=my_dict['value'])
+        elif my_dict['sign'] == '>':
+            query = query.filter(unq_val__gt=my_dict['value'])
+        elif my_dict['sign'] == '<':
+            query = query.filter(unq_val__lt=my_dict['value'])
+        elif my_dict['sign'] == '>=':
+            query = query.filter(unq_val__gte=my_dict['value'])
+        elif my_dict['sign'] == '<=':
+            query = query.filter(unq_val__lte=my_dict['value'])
+        elif my_dict['sign'] == '<>':
+            query = query.exclude(unq_val=my_dict['value'])
+        return query
+
+    search_filter = []
+    # Если класс имеет древовидную структуру, отфильтруем объекты по ветке
+    if tree:
+        if not branch or branch['code'] == 0:
+            codes = query.filter(name__name='parent_branch', value__isnull=True).values('code').distinct()
+        else:
+            codes = query.filter(name__name='parent_branch', value=branch['code']).values('code').distinct()
+        query = query.filter(code__in=Subquery(codes))
+    if 'object_code' in request.POST:
+        object_code = int(request.POST['object_code'])
+        query = query.filter(code=object_code)
+        search_filter.append({'code': object_code})
+    elif 'input_owner' in request.POST:
+        input_owner = int(request.POST['input_owner']) if request.POST['input_owner'] else 0
+        try:
+            owner = next(h for h in headers if h['name'] == 'Собственник')
+        except StopIteration:
+            owner_id = 0
+        else:
+            owner_id = owner['id']
+        query = query.filter(name_id=owner_id, value=input_owner)
+        search_filter.append({'header_id': owner_id, 'type': 'link', 'value': input_owner})
+    elif 'i_search_filter' in request.POST and request.POST['i_search_filter']:
+        search_filter = json.loads(request.POST['i_search_filter'])
+        for sf in search_filter:
+            if 'code' in sf:
+                query = query.filter(code=sf['code'])
+                break
+            elif 'dtc' in sf:
+                if sf['dtc']:
+                    header_dtc = next(h for h in headers if h['name'] == 'system_data')
+                    if sf['sign'] == '=':
+                        var_query = Q(value__datetime_create=sf['dtc'])
+                    elif sf['sign'] == '>':
+                        var_query = Q(value__datetime_create__gt=sf['dtc'])
+                    elif sf['sign'] == '<':
+                        var_query = Q(value__datetime_create__lt=sf['dtc'])
+                    elif sf['sign'] == '>=':
+                        var_query = Q(value__datetime_create__gte=sf['dtc'])
+                    elif sf['sign'] == '<=':
+                        var_query = Q(value__datetime_create__lte=sf['dtc'])
+                    else:
+                        var_query = ~Q(value__datetime_create=sf['dtc'])
+                    query_codes = query.filter(var_query, name_id=header_dtc['id'])
+                    list_qc = [qc['code'] for qc in query_codes.values('code').distinct()]
+                else:
+                    if sf['sign'] in ('<>', '>=', '>'):
+                        continue
+                    else:
+                        list_qc = []
+            elif 'array_id' in sf:
+                array_manager = ContractCells.objects if request.path == '/contract' else Objects.objects
+                owners = array_manager.filter(parent_structure_id=sf['array_id'], name__name='Собственник')
+                base_subquery_codes = owners.filter(value__in=Subquery(query.values('code').distinct())).values('code')
+                subquery = array_manager.filter(parent_structure_id=sf['array_id'], code__in=Subquery(base_subquery_codes))
+                sq_codes = []
+                for sub_obj in sf['data']:
+                    subquery_codes = subquery.filter(name_id=sub_obj['header_id'], value__isnull=False)
+                    if sub_obj['type'] == 'bool':
+                        if sub_obj['value']:
+                            subquery_codes = subquery_codes.filter(value=sub_obj['value']).values('code')
+                        else:
+                            true_codes = subquery_codes.exclude(value=sub_obj['value'])
+                            subquery_codes = subquery.exclude(code__in=Subquery(true_codes.values('code').distinct()))
+                    elif sub_obj['type'] == 'float':
+                        if sub_obj['value']:
+                            subquery_codes = subquery_codes.annotate(float_val=Cast('value', output_field=FloatField()))
+                            subquery_codes = filter_float(subquery_codes, sub_obj)
+                        else:
+                            if sub_obj['sign'] in ('<', '<=', '='):
+                                subquery_codes = subquery.exclude(code__in=subquery_codes.values('code').distinct())
+                    elif sub_obj['type'] in ('date', 'datetime'):
+                        subquery_codes = subquery_codes\
+                            .annotate(unq_val=ExpressionWrapper(Func(F('value'), function='JSON_UNQUOTE'),
+                                                                output_field=CharField()))
+                        if sub_obj['value']:
+                            subquery_codes = filter_dates(subquery_codes, sub_obj)
+                        else:
+                            if sf['sign'] in ('=', '<=', '<'):
+                                subquery_codes = subquery.exclude(code__in=Subquery(subquery_codes.values('code').distinct()))
+                            elif sf['sign'] in ('<>', '>'):
+                                pass
+                            else:
+                                continue
+                    else:
+                        if sub_obj['value']:
+                            subquery_codes = subquery_codes.filter(value__icontains=sub_obj['value'])
+                        else:
+                            subquery_codes = subquery.exclude(code__in=Subquery(subquery_codes.values('code')))
+                    sq_codes = [sq['code'] for sq in subquery_codes.values('code').distinct()]
+                    if sf['data'].index(sub_obj) < len(sf['data']) - 1:
+                        subquery = subquery.filter(code__in=sq_codes)
+                my_owners = owners.filter(code__in=sq_codes).values('value').distinct()
+                list_qc = [mo['value'] for mo in my_owners]
+            else:
+                is_mySql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
+                query_codes = query.filter(name_id=sf['header_id'])
+                if sf['type'] == 'bool':
+                    query_codes = query_codes.filter(value=True)
+                elif sf['type'] == 'float':
+                    query_codes = query_codes.filter(value__isnull=False)
+                    if sf['value']:
+                        query_codes = query_codes.annotate(float_val=Cast('value', output_field=FloatField()))
+                        query_codes = filter_float(query_codes, sf)
+                    else:
+                        if sf['sign'] in ('<', '<=', '='):
+                            ext_codes = query_codes.values('code').distinct()
+                            query_codes = query.exclude(code__in=Subquery(ext_codes))
+                        elif sf['sign'] in ('<>', '>'):
+                            pass
+                        else:
+                            continue
+                elif sf['type'] in ('date', 'datetime'):
+                    query_codes = query_codes.filter(value__isnull=False)
+                    if is_mySql:
+                        query_codes = query_codes.annotate(unq_val=ExpressionWrapper(Func(F('value'), function='JSON_UNQUOTE'),
+                                                             output_field=CharField()))
+                    else:
+                        query_codes = query_codes.annotate(unq_val=F('value'))
+                    if sf['value']:
+                        query_codes = filter_dates(query_codes, sf)
+                    else:
+                        if sf['sign'] in ('=', '<=', '<'):
+                            query_codes = query.exclude(code__in=Subquery(query_codes.values('code').distinct()))
+                        elif sf['sign'] in ('<>', '>'):
+                            pass
+                        else:
+                            continue
+                elif sf['type'] == 'link':
+                    if sf['value']:
+                        query_codes = query_codes.filter(value=sf['value'])
+                # другие типы данных
+                else:
+                    if sf['value']:
+                        if is_mySql:
+                            query_codes = query_codes.filter(value__icontains=sf['value'])
+                        else:
+                            reg_ex = ''.join('\\' + v if not v.isalpha() else v for v in sf['value'])
+                            query_codes = [qc for qc in query_codes if re.search(reg_ex, qc.value, re.IGNORECASE)]
+
+                # финальная фильтрация итерации
+                if sf['value']:
+                    list_qc = [qc.code for qc in query_codes]
+                else:
+                    if sf['type'] in ('float', 'date', 'datetime'):
+                        list_qc = [qc.code for qc in query_codes]
+                    else:
+                        excluded_codes = [ec.code for ec in query_codes.filter(value__isnull=False)]
+                        list_qc = [qc['code'] for qc in query.exclude(code__in=excluded_codes).values('code').distinct()]
+            query = query.filter(code__in=list_qc)
+    query = query.values('code').distinct().order_by('-code')
+    return query, search_filter

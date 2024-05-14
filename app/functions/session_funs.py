@@ -270,12 +270,10 @@ def update_omtd(request):
         # Загрузим массивы для контрактов и справочников
         if current_class.formula in ('table', 'contract'):
             arrays = class_manager.filter(parent_id=current_class.id, formula='array')
-            # щАС ДОДЕЛАЮ
-            # [h for h in headers if h['formula'] == 'array']
             if arrays:
                 list_arrays = []
                 for a in arrays:
-                    dict_array = {'id': a.id}
+                    dict_array = {'id': a.id, 'name': a.name}
                     headers = list(class_manager.filter(parent_id=a.id).exclude(formula='techpro').values())
                     dict_array['headers'] = headers
                     dict_array['vis_headers'] = []

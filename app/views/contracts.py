@@ -19,7 +19,7 @@ from django.shortcuts import render
 from django.urls import reverse
 from app.functions import session_funs, reg_funs, database_funs, convert_funs, common_funs, database_procedures, \
     interface_funs, tree_funs, interface_procedures, convert_funs2, contract_funs, view_procedures, api_procedures, \
-    task_funs, object_funs
+    task_funs, object_funs, convert_procedures
 from app.models import Contracts, ContractCells, Dictionary, DictObjects, Designer, ContractDrafts, Tasks, TechProcess, \
     TechProcessObjects
 
@@ -590,7 +590,8 @@ def manage_contracts(request):
                                 all_changes = interface_funs.stpirt(cp, p['value'], request.user.id, timestamp)
                             else:
                                 # данные регистрации
-                                incoming = {'class_id': cp.parent_id, 'id': header.id, 'location': 'contract', 'type': header.formula}
+                                incoming = {'class_id': cp.parent_id, 'id': header.id, 'location': 'contract',
+                                            'type': header.formula}
                                 outcoming = incoming.copy()
                                 incoming['id'] = p['id']
                                 outcoming['id'] = p['id']
@@ -624,6 +625,19 @@ def manage_contracts(request):
                                     outcoming['is_visible'] = p['visible']
                                     cp.is_visible = p['visible']
                                     is_change = True
+                                # итоги
+                                if 'totals' in p:
+                                    if not cp.settings or 'totals' not in cp.settings \
+                                            or sorted(cp.settings['totals']) != sorted(p['totals']):
+                                        incoming['settings'] = copy.deepcopy(cp.settings)
+                                        if incoming['settings']:
+                                            outcoming['settings'] = copy.deepcopy(incoming['settings'])
+                                            outcoming['settings']['totals'] = p['totals']
+                                            cp.settings['totals'] = p['totals']
+                                        else:
+                                            outcoming['settings'] = {'totals': p['totals']}
+                                            cp.settings = {'totals': p['totals']}
+                                        is_change = True
                                 if 'is_required' in p and cp.is_required != p['is_required']:
                                     # проверка, есть ли дефолт для обязательных полей
                                     if p['is_required'] and cp.formula not in ('eval', 'enum', 'file', 'bool') and not \
@@ -761,17 +775,19 @@ def manage_contracts(request):
                         for cc in current_class:
                             if cc.priority and cc.priority > max_priority:  max_priority = cc.priority
                         val = p['location'] + '.' + p['value'] if 'location' in p else p['value']
+                        settings = {'totals': p['totals']} if 'totals' in p and p['totals'] else None
                         new_field = Contracts(name=p['name'], formula=p['type'], is_required=bool(p['is_required']),
                                              parent_id=class_id, value=val, default=p['default'],
-                                             is_visible=p['visible'], priority=max_priority + 1, delay=p['delay'])
+                                             is_visible=p['visible'], priority=max_priority + 1, delay=p['delay'],
+                                              settings=settings)
                         new_field.save()
                         message += 'Создан новый параметр класса \"' + request.POST['i_name'] + '\"<br>'
                         all_changes = True
                         # Регистрация
                         dict_field = {'id': new_field.id, 'name': new_field.name, 'formula': new_field.formula,
                                       'value': new_field.value, 'is_required': new_field.is_required,
-                                      'default': new_field.default,
-                                      'is_visible': new_field.is_visible}
+                                      'default': new_field.default, 'is_visible': new_field.is_visible,
+                                      'settings': settings}
                         outcome = {'class_id': header.id, 'location': 'contract', 'type': header.formula}
                         outcome.update(dict_field)
                         reg = {
@@ -982,10 +998,27 @@ def manage_contracts(request):
             if is_valid:
                 # Проверим линк мап
                 lm = Contracts.objects.get(parent_id=class_id, name='link_map')
-                old_val = lm.value
-                if old_val != sys_params['lm']:
+                old_val = copy.deepcopy(lm.value)
+                lm_change = False
+                if not sys_params['lm']:
+                    if sys_params['lm'] != old_val:
+                        lm_change = True
+                else:
+                    for l in sys_params['lm']:
+                        if not old_val:
+                            lm_change = True
+                            break
+                        try:
+                            find_old_l = next(ov for ov in old_val if ov['contract'] == l['contract'])
+                        except StopIteration:
+                            lm_change = True
+                            break
+                        if find_old_l != l:
+                            lm_change = True
+                            break
+                if lm_change:
                     is_change = True
-                    lm.value = sys_params['lm']
+                    lm.value = sorted(sys_params['lm'], key=lambda x: x['contract'])
                     lm.save()
                     reg_sys_param(lm, old_val)
 
@@ -1659,7 +1692,13 @@ def contract(request):
                                                request.session['temp_object_manager']['tree_headers'], request.user.id, True)
             # Если контракт новый - редиректим
             if is_saved and not request.POST['i_code']:
-                url = '/contract?class_id=' + request.POST['class_id'] + '&object_code=' + str(code) + '&message=Новый объект создан'
+                if current_class.formula == 'array':
+                    header_owner = next(h for h in headers if h['name'] == 'Собственник')
+                    owner = ContractCells.objects.get(code=code, parent_structure_id=current_class.id, name_id=header_owner['id'])
+                    url = '/contract?class_id=' + request.POST['class_id'] + '&input_owner=' + str(owner.value)\
+                          + '&message=Новый объект создан'
+                else:
+                    url = '/contract?class_id=' + request.POST['class_id'] + '&object_code=' + str(code) + '&message=Новый объект создан'
                 return redirect(url)
 
         # кнопка "Скачать файл"
@@ -1747,7 +1786,7 @@ def contract(request):
                 message = 'Вы не выбрали объект для удаления'
 
         # кнопка "удалить словарь"
-        elif 'b_delete_dict' in request.POST and request.POST['delete_dict']:
+        elif 'b_delete_dict' in request.POST:
             database_procedures.delete_dict_records(int(request.POST['i_code']), int(request.POST['delete_dict']),
                                                     request.user.id)
             message = 'Объект обновлен<br>'
@@ -1764,80 +1803,37 @@ def contract(request):
             message += interface_funs.make_graft(request, code, True)[1]
             message += 'Черновик был создан<br>'
 
-        # Выбор ветки
-        elif 'branch_code' in request.POST:
-            tree_id = current_class.parent_id
-            branch_code, tree, branch = interface_funs.check_branch(request, tree_id, True)
-            branch = tree_funs.find_branch(tree, 'code', branch_code)
+        if tree:
+            tree_id = request.session['temp_object_manager']['tree_headers'][0]['parent_id']
+            if 'branch_code' in request.POST:
+                branch_code = int(request.POST['branch_code'])
+                branch = interface_funs.check_branch(request, tree_id, branch_code)
+            elif 'branch' in request.POST and request.POST['branch']:
+                branch_code = int(request.POST['branch'])
+                branch = tree_funs.find_branch(tree, 'code', branch_code)
 
-        # Перейти на страницу управления веткой
-        elif 'edit_branch' in request.POST:
-            address = '/tree?class_id=' + str(current_class.parent_id) + '&location=c' + '&input_search=' + request.POST['edit_branch']
-            return redirect(address)
+            # Перейти на страницу управления веткой
+            elif 'edit_branch' in request.POST:
+                address = '/tree?class_id=' + str(current_class.parent_id) + '&location=c' + '&input_search=' \
+                          + request.POST['edit_branch']
+                return redirect(address)
 
         # Вывод
-        if tree:
-            if not branch:
-                branch = interface_procedures.check_branch(request, True)
-            # фильтры
-            # по коду контракта
-            if 'object_code' in request.POST:
-                object_code = int(request.POST['object_code'])
-                objects = ContractCells.objects.filter(code=object_code, parent_structure_id=class_id)
-                object_branch = objects.filter(name__name='parent_branch')
-                if object_branch:
-                    branch_code = object_branch[0].value
-                    branch = tree_funs.find_branch(tree, 'code', branch_code)
-                    if branch:
-                        tree_funs.open_branch(branch, tree)
-                else:
-                    branch = {'code': 0}
-                objects_name = objects.values('code').distinct()
-            else:
-                objects_name = interface_funs.branch_objects_codes(branch, class_id, True)
-        else:
-            name = 'system_data' if current_class.formula == 'contract' else 'Собственник'
-            name_id = Contracts.objects.filter(parent_id=class_id, is_required=True, name__iexact=name)\
-                .order_by('id')[0].id
-            objects_name = ContractCells.objects.filter(parent_structure_id=class_id, name_id=name_id).order_by('-code')
-
-        # Фильтры
-        # По айди объекта
-        if 'object_code' in request.POST:
-            objects_name = objects_name.filter(code=int(request.POST['object_code']))
-        # Поиск по названию и коду объекта
-        elif 'input_search' in request.POST and request.POST['input_search']:
-            search_data = request.POST['input_search']
-            list_search_data = search_data.split()
-            try:  # пытаемся получить ID товара
-                num_search = int(search_data)
-            except ValueError:
-                num_search = 0
-            result_search = objects_name.filter(code=num_search)
-            if result_search:
-                objects_name = result_search
-            else:
-                objects_name = objects_name.filter((reduce(operator.or_, (Q(value__icontains=x) for x in list_search_data)))).order_by('-id')
-        # фильтр по собственнику (для массивов)
-        if 'input_owner' in request.POST and request.POST['input_owner']:
-            subname_id = Contracts.objects.get(parent_id=class_id, is_required=True, name='Собственник').id
-            sub = ContractCells.objects.filter(parent_structure_id=class_id, name_id=subname_id, code=OuterRef('code'))
-            objects_name = objects_name.annotate(owner=Subquery(sub.values('value')[:1])).filter(owner=int(request.POST['input_owner']))
+        query = ContractCells.objects.filter(parent_structure_id=class_id)
+        query, search_filter = interface_funs.sandf(request, query, headers, tree, branch)
 
         # Пагинация и конвертация
         q_items = int(request.POST['q_items_on_page']) if 'q_items_on_page' in request.POST else 10
         page_num = int(request.POST['page']) if 'page' in request.POST and request.POST['page'] else 1
-        paginator = common_funs.paginator_object(objects_name, q_items, page_num)
-        vis_header_ids = [h['id'] for h in headers if h['is_visible']]
+        paginator = common_funs.paginator_object(query, q_items, page_num)
+        visible_headers, vhids = interface_procedures.pack_vis_headers(current_class, headers, True)
         objects = ContractCells.objects.filter(code__in=paginator['items_codes'], parent_structure_id=class_id,
-                                               name_id__in=vis_header_ids)
+                                               name_id__in=vhids)
         objects = convert_funs.queyset_to_object(objects)
         objects.sort(key=lambda x: x['code'], reverse=True)
 
         # Конвертнем поля
         convert_funs.prepare_table_to_template([h for h in headers if h['is_visible']], objects, request.user.id, True)
-        # # добавим словари
-        # convert_funs.add_dicts(objects, request.session['temp_object_manager']['my_dicts'])
         # # добавим техпроцессы
         lcf2 = []
         if 'my_tps' in request.session['temp_object_manager']:
@@ -1850,16 +1846,16 @@ def contract(request):
 
         # Видимые заголовки для деревьев
         if tree:
-            visible_headers = []
+            tree_visible_headers = []
             for th in request.session['temp_object_manager']['tree_headers']:
                 if th['is_visible']:
-                    visible_headers.append(th)
-                if len(visible_headers) > 4:
+                    tree_visible_headers.append(th)
+                if len(tree_visible_headers) > 4:
                     break
         else:
-            visible_headers = None
-
-        # контрольный пересчет заданий
+            tree_visible_headers = None
+        # итоги
+        totals = convert_procedures.gtfol(objects, visible_headers, True)
         session_funs.check_quant_tasks(request)
         # Периоды таймлайна
         ctx = {
@@ -1871,11 +1867,14 @@ def contract(request):
             'message': message,
             'message_class': message_class,
             'branch': branch,
-            'visible_headers': visible_headers,
+            'tree_visible_headers': tree_visible_headers,
             'lcf': lcf,
             'lcf2': lcf2,
             'is_contract': 'true',
-            'db_loc': 'c'
+            'db_loc': 'c',
+            'visible_headers': visible_headers,
+            'totals': totals,
+            'search_filter': search_filter
         }
         return render(request, 'contracts/contract.html', ctx)
     else:

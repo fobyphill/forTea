@@ -1,6 +1,7 @@
 import json
 import operator
 import re
+from copy import deepcopy
 from datetime import datetime
 from functools import reduce
 
@@ -14,7 +15,8 @@ from django.urls import reverse
 import app.functions.database_funs
 import app.functions.reg_funs
 from app.functions import convert_funs, common_funs, reg_funs, database_funs, session_funs, database_procedures, \
-    interface_funs, tree_funs, interface_procedures, api_procedures, task_funs, convert_funs2, object_funs
+    interface_funs, tree_funs, interface_procedures, api_procedures, task_funs, convert_funs2, object_funs, \
+    convert_procedures
 from app.models import Designer, Objects, Dictionary, DictObjects, ContractCells, Contracts, TableDrafts, TechProcess, Tasks
 
 
@@ -27,9 +29,6 @@ def manage_object(request):
                 return redirect('/manage-object?class_id=' + first_id)
             else:
                 return render(request, 'handbooks/manage-object.html', {'current_class': None})
-
-        branch = None
-
         # загрузить дерево классов в сессию
         if not 'class_tree' in request.session:
             session_funs.update_class_tree(request)
@@ -116,7 +115,8 @@ def manage_object(request):
             # Если справочник новый - редиректим
             if is_saved and not request.POST['i_code']:
                 request.POST._mutable = True
-                request.POST['input_search'] = str(code)
+                if not 'input_owner' in request.POST:
+                    request.POST['input_search'] = str(code)
                 request.POST._mutable = False
 
         # Кновка "В черновик"
@@ -197,98 +197,55 @@ def manage_object(request):
             message = 'Объект сохранен<br>'
 
         # Выделить ветку
-        elif 'branch_code' in request.POST:
-            tree_id = current_class.parent_id
-            branch_code, tree, branch = interface_funs.check_branch(request, tree_id)
+        branch = None
+        if tree:
+            tree_id = request.session['temp_object_manager']['tree_headers'][0]['parent_id']
+            if 'branch_code' in request.POST:
+                branch_code = int(request.POST['branch_code'])
+                branch = interface_funs.check_branch(request, tree_id, branch_code)
+            elif 'branch' in request.POST and request.POST['branch']:
+                branch_code = int(request.POST['branch'])
+                branch = tree_funs.find_branch(tree, 'code', branch_code)
 
-        # Перейти на страницу управления веткой
-        elif 'edit_branch' in request.POST:
-            address = '/tree?class_id=' + str(current_class.parent_id) + '&location=t' + '&input_search=' + \
-                      request.POST['edit_branch']
-            return redirect(address)
+            # Перейти на страницу управления веткой
+            elif 'edit_branch' in request.POST:
+                address = '/tree?class_id=' + str(current_class.parent_id) + '&location=t' + '&input_search=' + \
+                          request.POST['edit_branch']
+                return redirect(address)
 
-        # Вывод
-        if current_class.parent_id and current_class.parent.formula == 'tree':
-            if not branch:
-                branch = interface_procedures.check_branch(request)
-            # Фильтр по коду объекта
-            if 'object_code' in request.POST:
-                object_code = int(request.POST['object_code'])
-                objects = Objects.objects.filter(code=object_code, parent_structure_id=class_id)
-                object_branch = objects.filter(name__name='parent_branch')
-                if object_branch:
-                    branch_code = object_branch[0].value
-                    branch = tree_funs.find_branch(tree, 'code', branch_code)
-                    if branch:
-                        tree_funs.open_branch(branch, tree)
-                else:
-                    branch = {'code': 0}
-                objects_name = objects.values('code').distinct()
-            else:
-                # обычный вывод объектов в рамках активной ветки
-                objects_name = interface_funs.branch_objects_codes(branch, class_id)
-        else:
-            name_id = Designer.objects.filter(parent_id=class_id, is_required=True)[0].id
-            objects_name = Objects.objects.filter(parent_structure_id=class_id, name_id=name_id).order_by('-code')
-
-            # Фильтры
-            # По айди объекта
-            if 'object_code' in request.POST:
-                object_code = int(request.POST['object_code'])
-                objects_name = objects_name.filter(code=object_code)
-
-            # Поиск по названию и коду объекта
-            elif 'input_search' in request.POST and request.POST['input_search']:
-                search_data = request.POST['input_search']
-                list_search_data = search_data.split()
-                try:  # пытаемся получить код
-                    num_search = int(search_data)
-                except ValueError:
-                    num_search = 0
-                result_name = objects_name.filter(code=num_search)
-                if result_name:
-                    objects_name = result_name
-                else:
-                    objects_name = objects_name.filter((reduce(operator.or_, (Q(value__icontains=x) for x in list_search_data)))).order_by('-id')
-
-            # фильтр по собственнику (для массивов)
-            if ('input_owner' in request.POST and request.POST['input_owner']):
-                input_owner = request.POST['input_owner']
-                subname_id = Designer.objects.get(parent_id=class_id, is_required=True, name='Собственник').id
-                sub = Objects.objects.filter(parent_structure_id=class_id, name_id=subname_id, code=OuterRef('code'))
-                objects_name = objects_name.annotate(owner=Subquery(sub.values('value')[:1]))
-                if input_owner: objects_name = objects_name.filter(owner=input_owner)
+        # вывод
+        query = Objects.objects.filter(parent_structure_id=class_id)
+        query, search_filter = interface_funs.sandf(request, query, headers, tree, branch)
 
         # Пагинация и конвертация
         q_items = int(request.POST['q_items_on_page']) if 'q_items_on_page' in request.POST else 10
         page_num = int(request.POST['page']) if 'page' in request.POST and request.POST['page'] else 1
-        paginator = common_funs.paginator_object(objects_name, q_items, page_num)
+        paginator = common_funs.paginator_object(query, q_items, page_num)
+        visible_headers, vhids = interface_procedures.pack_vis_headers(current_class, headers)
         objects = Objects.objects.filter(code__in=paginator['items_codes'],
-                                         parent_structure_id=class_id).select_related('parent_structure', 'name')
+                                         parent_structure_id=class_id, name_id__in=vhids)\
+                .select_related('parent_structure', 'name')
         objects = convert_funs.queyset_to_object(objects)
         objects.sort(key=lambda x: x['code'], reverse=True)
         # Конвертнем поля
-        convert_funs.prepare_table_to_template([h for h in headers if h['is_visible']], objects, request.user.id)
-        # конвертнем черновик
-        # if draft:
-        #     convert_funs.prepare_table_to_template(headers, (draft,), request.user.id)
+        convert_funs.prepare_table_to_template(visible_headers, objects, request.user.id)
         # добавим словари
         convert_funs.add_dicts(objects, request.session['temp_object_manager']['my_dicts'])
-        # Заголовки
-        # url = common_funs.edit_url(request)
         session_funs.crqd(request)  # контрольный пересчет количества черновиков
+
         # Видимые заголовки дерева
-        # visible_headers = Designer.objects.filter(parent_id=current_class.parent_id).exclude(formula='table')\
-        #     .exclude(name__in=('is_right_tree', 'name', 'parent')).order_by('id')[:3]
         if tree:
-            visible_headers = []
+            tree_visible_headers = []
             for th in request.session['temp_object_manager']['tree_headers']:
                 if th['is_visible']:
-                    visible_headers.append(th)
-                if len(visible_headers) > 4:
+                    tree_visible_headers.append(th)
+                if len(tree_visible_headers) > 4:
                     break
         else:
-            visible_headers = None
+            tree_visible_headers = None
+
+        totals = convert_procedures.gtfol(objects, visible_headers)  # Итоги
+
         # Периоды таймлайна
         timeline_to = timestamp + relativedelta(minutes=1)
         timeline_from = timeline_to - relativedelta(months=1)
@@ -301,11 +258,14 @@ def manage_object(request):
             'branch': branch,
             'headers': headers,
             'objects': objects,
-            'visible_headers': visible_headers,
+            'tree_visible_headers': tree_visible_headers,
             'timeline_to': timeline_to.strftime('%Y-%m-%dT%H:%M:%S'),
             'timeline_from': timeline_from.strftime('%Y-%m-%dT%H:%M:%S'),
             'is_contract': 'false',
-            'db_loc': 't'
+            'db_loc': 't',
+            'visible_headers': visible_headers,
+            'totals': totals,
+            'search_filter': search_filter
         }
         return render(request, 'handbooks/manage-object.html', ctx)
     else:
@@ -813,6 +773,19 @@ def manage_class_tree(request):
                                     outcoming['is_visible'] = p['visible']
                                     cp.is_visible = p['visible']
                                     is_change = True
+                                # итоги
+                                if 'totals' in p:
+                                    if not cp.settings or 'totals' not in cp.settings \
+                                            or sorted(cp.settings['totals']) != sorted(p['totals']):
+                                        incoming['settings'] = deepcopy(cp.settings)
+                                        if incoming['settings']:
+                                            outcoming['settings'] = deepcopy(incoming['settings'])
+                                            outcoming['settings']['totals'] = p['totals']
+                                            cp.settings['totals'] = p['totals']
+                                        else:
+                                            outcoming['settings'] = {'totals': p['totals']}
+                                            cp.settings = {'totals': p['totals']}
+                                        is_change = True
                                 if cp.is_required != p['is_required']:
                                     # проверка, есть ли дефолт для обязательных полей
                                     if p['is_required'] and cp.formula not in ('eval', 'enum', 'file', 'bool') and not p['default']:
@@ -956,10 +929,14 @@ def manage_class_tree(request):
                             delay_settings = {'handler': p['handler']}
                         else:
                             delay_settings = {'handler': None}
+                        if 'totals' in p and p['totals']:
+                            settings = {'totals': p['totals']}
+                        else:
+                            settings = None
                         new_field = Designer(name=p['name'], formula=p['type'], is_required=p['is_required'],
                                              parent_id=class_id, value=val, default=p['default'],
                                              is_visible=p['visible'], priority=max_priority + 1, delay=p['delay'],
-                                             delay_settings=delay_settings)
+                                             delay_settings=delay_settings, settings=settings)
                         new_field.save()
                         message += 'Создан новый параметр класса \"' + request.POST['i_name'] + '\"<br>'
                         all_changes = True
@@ -968,7 +945,9 @@ def manage_class_tree(request):
                         dict_field = {
                             'id': new_field.id, 'name': new_field.name, 'formula': new_field.formula,
                             'value': new_field.value, 'is_required': new_field.is_required, 'default': new_field.default,
-                            'is_visible': new_field.is_visible, 'delay': new_field.delay, 'delay_settings': delay_settings}
+                            'is_visible': new_field.is_visible, 'delay': new_field.delay, 'delay_settings': delay_settings,
+                            'settings': settings
+                        }
                         outcome = {'class_id': header.id, 'location': 'table', 'type': header.formula}
                         outcome.update(dict_field)
                         reg = { 'json': outcome}
@@ -1199,12 +1178,12 @@ def dictionary(request):
 
         dict_id = int(request.GET['class_id'])
         current_dict = request.session['temp_object_manager']['current_class']
-        code = int(request.POST['i_code']) if 'i_code' in request.POST and request.POST['i_code'] else None
-        parent_code = int(request.POST['i_owner']) if 'i_owner' in request.POST and request.POST['i_owner'] else None
+        code = int(request.POST['i_owner']) if 'i_owner' in request.POST and request.POST['i_owner'] else None
         timestamp = datetime.now()
+        headers = request.session['temp_object_manager']['headers']
 
         # Валидация. Вход - реквест. Выход - да/нет, сообщение
-        def validation(request):
+        def validation(request, new=False):
             message = ''
             is_valid = True
             # Проверка собственника
@@ -1212,16 +1191,14 @@ def dictionary(request):
                 is_valid = False
                 message = 'Не указан собственник. Запись словаря не сохранена<br>'
             else:
+                owner = int(request.POST['i_owner'])
                 manager = Objects.objects if request.POST['parent_type'] == 'table' else ContractCells.objects
-                if not manager.filter(code=request.POST['i_owner']):
+                if not manager.filter(code=owner):
                     is_valid = False
                     message = 'Собственника с кодом ' + request.POST['i_owner'] + ' не существует<br>'
                 else:
                     # Проверим, не занят ли собственник
-                    dict = DictObjects.objects.filter(parent_code=request.POST['i_owner'], parent_structure_id=request.GET['class_id'])
-                    if request.POST['i_code']:
-                        dict = dict.exclude(code=request.POST['i_code'])
-                    if dict:
+                    if new and DictObjects.objects.filter(code=owner, parent_structure_id=request.GET['class_id']):
                         is_valid = False
                         message = 'У выбранного собственника уже есть запись из данного словаря<br>'
             for k, v in request.POST.items():
@@ -1230,33 +1207,33 @@ def dictionary(request):
                 except AttributeError:
                     continue
                 else:
-                    current_field = next(cc for cc in class_params if cc.id == int(field_id))
+                    current_field = next(h for h in headers if h['id'] == int(field_id))
                     # Проверяем только заполненные поля. Пустые игнорим
                     if v:
                         # 3. Проверка числового поля
-                        if current_field.formula == 'float':
+                        if current_field['formula'] == 'float':
                             try:
                                 float(v)
                             except ValueError:
                                 is_valid = False
-                                message += ' Некорректно указано значение поля \"' + current_field.name + '\".<br>'
+                                message += ' Некорректно указано значение поля \"' + current_field['name'] + '\".<br>'
                         # 4. Проверка формата ДатаВремя
-                        elif current_field.formula == 'datetime':
+                        elif current_field['formula'] == 'datetime':
                             try:
-                                datetime.strptime(v, '%Y-%m-%dT%H:%M')
+                                datetime.strptime(v, '%Y-%m-%dT%H:%M:%S')
                             except ValueError:
                                 is_valid = False
-                                message += ' Некорректно указано значение поля \"' + current_field.name + '\".<br>'
+                                message += ' Некорректно указано значение поля \"' + current_field['name'] + '\".<br>'
                         # 5. Проверка формата Дата
-                        elif current_field.formula == 'date':
+                        elif current_field['formula'] == 'date':
                             try:
                                 datetime.strptime(v, '%Y-%m-%d')
                             except ValueError:
                                 is_valid = False
-                                message += ' Некорректно указано значение поля \"' + current_field.name + '\".<br>'
+                                message += ' Некорректно указано значение поля \"' + current_field['name'] + '\".<br>'
                         # 6/ Проверка ссылки
-                        elif current_field.formula == 'link':
-                            header_link = re.match(r'(?:table|contract)\.(\d+)\.', current_field.default)[0] + v
+                        elif current_field['formula'] == 'link':
+                            header_link = re.match(r'(?:table|contract)\.(\d+)\.', current_field['default'])[0] + v
                             link_valid = interface_procedures.cdl(header_link)
                             if not link_valid:
                                 message += 'Некорректно указана ссылка<br>'
@@ -1265,178 +1242,157 @@ def dictionary(request):
 
         # Кнопка "Сохранить"
         if 'b_save' in request.POST:
-            class_params = Dictionary.objects.filter(parent_id=request.GET['class_id'])
+            # class_params = Dictionary.objects.filter(parent_id=request.GET['class_id'])
             transact_id = None
             # редактируем
-            if request.POST['i_code']:
-                is_valid, message = validation(request)
-                if is_valid:
-                    dict_objects = DictObjects.objects.filter(code=code, parent_structure_id=dict_id).select_related('name')
-                    general_data_reg = {'class_id': current_dict['id'], 'location': current_dict['default'], 'type': 'dict',
-                                        'code': code, 'parent_code': int(parent_code)}
-                    edit_objects = []
-                    new_objects = []
-                    # были ли внесены изменения
-                    for k, v in request.POST.items():
-                        try:
-                            field_id = int(re.search(r'^(ta|chb|i_datetime|i_date|i_float|s_enum|i_link)_(?P<id>\d+)$',
-                                                     k).group('id'))
-                        except AttributeError:
-                            continue
-                        else:
-                            try:
-                                o = next(o for o in dict_objects if o.name_id == field_id)
-                            except StopIteration:
-                                o = DictObjects(name_id=field_id, parent_structure_id=dict_id,
-                                            code=code, value='', parent_code=parent_code)
-                            if o.value != v:
-                                old_value = o.value
-                                o.value = v
-                                if o.id:    edit_objects.append({'old_value': old_value, 'edited_req': o})
-                                else:   new_objects.append(o)
-                    # Если изменения были, то внесем их
-                    is_save = False
-                    if edit_objects:
-                        is_save = True
-                        DictObjects.objects.bulk_update([eo['edited_req'] for eo in edit_objects], ['value'])
-                        transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'd')
-                        # Регистрация
-                        for eo in edit_objects:
-                            ic = general_data_reg.copy()
-                            ic['id'] = eo['edited_req'].id
-                            ic['name'] = eo['edited_req'].name_id
-                            ic['value'] = eo['old_value']
-                            oc = ic.copy()
-                            oc['value'] = eo['edited_req'].value
-                            reg = {'json': oc, 'json_income': ic}
-                            reg_funs.simple_reg(request.user.id, 15, timestamp, transact_id, **reg)
-                    if new_objects:
-                        if not transact_id:
-                            transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'd')
-                        is_save = True
-                        DictObjects.objects.bulk_create(new_objects)
-                        # регистрация
-                        for no in new_objects:
-                            oc = general_data_reg.copy()
-                            new_req = DictObjects.objects.get(code=no.code, parent_code=no.parent_code, name_id=no.name_id,
-                                                              parent_structure_id=no.parent_structure_id)
-                            oc['id'] = new_req.id
-                            oc['name'] = new_req.name_id
-                            oc['value'] = new_req.value
-                            reg = {'json': oc}
-                            reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, **reg)
-                    if is_save:
-                        message = 'Объект изменен'
+            is_valid, message = validation(request)
+            if is_valid:
+                dict_objects = DictObjects.objects.filter(code=code, parent_structure_id=dict_id).select_related('name')
+                general_data_reg = {'class_id': current_dict['id'], 'location': current_dict['default'], 'type': 'dict',
+                                    'code': code}
+                edit_objects = []
+                new_objects = []
+                # были ли внесены изменения
+                for k, v in request.POST.items():
+                    try:
+                        field_id = int(re.search(r'^(ta|chb|i_datetime|i_date|i_float|s_enum|i_link)_(?P<id>\d+)$',
+                                                 k).group('id'))
+                    except AttributeError:
+                        continue
                     else:
-                        message += ' Вы ничего не изменили. Объект не сохранен<br>'
-                else:
-                    message_class = 'text-red'
-                    message += '<br>Объект не сохранен'
-            # Создаем новый
-            else:
-                is_valid, message = validation(request)
-                if is_valid:
-                    code = database_funs.get_code(int(request.GET['class_id']), 'dict')
-                    transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'd')
-                    # регистрация создания объекта
-                    outcoming = {'class_id': dict_id, 'type': 'dict', 'location': current_dict['default'],
-                                 'code': code, 'parent_code': int(parent_code)}
-                    reg = {'json': outcoming}
-                    reg_funs.simple_reg(request.user.id, 5, timestamp, transact_id, **reg)
-                    dict_objects = []
-                    # Сохраняем
-                    for k, v in request.POST.items():
                         try:
-                            field_id = int(re.search(r'^(ta|i_datetime|i_float|chb|i_link|'
-                                                     r'i_date|s_enum)_(?P<id>\d+)$', k).group('id'))
-                        except AttributeError:
-                            continue
-                        else:
-                            dict_objects.append(DictObjects(code=code, parent_structure_id=int(request.GET['class_id']),
-                                                  name_id=field_id, value=v, parent_code=request.POST['i_owner']))
-                    DictObjects.objects.bulk_create(dict_objects)
-                    message = 'Объект успешно создан. Код объекта: ' + str(code)
-                    # Регистрация создания реквизитов объекта
-                    new_object_params = DictObjects.objects.filter(code=code, parent_structure_id=dict_id).exclude(name_id=137)
-                    for nop in new_object_params:
-                        oc = {}
-                        oc.update(outcoming)
-                        nop = model_to_dict(nop)
-                        del nop['parent_structure']
-                        oc.update(nop)
+                            o = next(o for o in dict_objects if o.name_id == field_id)
+                        except StopIteration:
+                            o = DictObjects(name_id=field_id, parent_structure_id=dict_id,
+                                        code=code, value='')
+                        if o.value != v:
+                            old_value = o.value
+                            o.value = v
+                            if o.id:    edit_objects.append({'old_value': old_value, 'edited_req': o})
+                            else:   new_objects.append(o)
+                # Если изменения были, то внесем их
+                is_save = False
+                if edit_objects:
+                    is_save = True
+                    DictObjects.objects.bulk_update([eo['edited_req'] for eo in edit_objects], ['value'])
+                    transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'd')
+                    # Регистрация
+                    for eo in edit_objects:
+                        ic = general_data_reg.copy()
+                        ic['id'] = eo['edited_req'].id
+                        ic['name'] = eo['edited_req'].name_id
+                        ic['value'] = eo['old_value']
+                        oc = ic.copy()
+                        oc['value'] = eo['edited_req'].value
+                        reg = {'json': oc, 'json_income': ic}
+                        reg_funs.simple_reg(request.user.id, 15, timestamp, transact_id, **reg)
+                if new_objects:
+                    if not transact_id:
+                        transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'd')
+                    is_save = True
+                    DictObjects.objects.bulk_create(new_objects)
+                    # регистрация
+                    for no in new_objects:
+                        oc = general_data_reg.copy()
+                        new_req = DictObjects.objects.get(code=no.code, name_id=no.name_id,
+                                                          parent_structure_id=no.parent_structure_id)
+                        oc['id'] = new_req.id
+                        oc['name'] = new_req.name_id
+                        oc['value'] = new_req.value
                         reg = {'json': oc}
                         reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, **reg)
-                    # Удаляем информацию о странице из реквеста
-                    request.POST._mutable = True
-                    del request.POST['page']
-                    request.POST._mutable = False
+                if is_save:
+                    message = 'Объект изменен'
                 else:
-                    message_class = 'text-red'
-                    message += '<br>Объект не сохранен'
+                    message += ' Вы ничего не изменили. Объект не сохранен<br>'
+            else:
+                message_class = 'text-red'
+                message += '<br>Объект не сохранен'
+
+        # Создаем новый
+        elif 'b_new_dict' in request.POST:
+            is_valid, message = validation(request, True)
+            if is_valid:
+                code = int(request.POST['i_owner'])
+                transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'd')
+                # регистрация создания объекта
+                outcoming = {'class_id': dict_id, 'type': 'dict', 'location': current_dict['default'],
+                             'code': code}
+                reg = {'json': outcoming}
+                reg_funs.simple_reg(request.user.id, 5, timestamp, transact_id, **reg)
+                dict_objects = []
+                # Сохраняем
+                for k, v in request.POST.items():
+                    try:
+                        field_id = int(re.search(r'^(ta|i_datetime|i_float|chb|i_link|'
+                                                 r'i_date|s_enum)_(?P<id>\d+)$', k).group('id'))
+                    except AttributeError:
+                        continue
+                    else:
+                        dict_objects.append(DictObjects(code=code, parent_structure_id=int(request.GET['class_id']),
+                                            name_id=field_id, value=v))
+                DictObjects.objects.bulk_create(dict_objects)
+                message = 'Объект успешно создан. Код объекта: ' + str(code)
+                # Регистрация создания реквизитов объекта
+                new_object_params = DictObjects.objects.filter(code=code, parent_structure_id=dict_id)
+                for nop in new_object_params:
+                    oc = {}
+                    oc.update(outcoming)
+                    nop = model_to_dict(nop)
+                    del nop['parent_structure']
+                    oc.update(nop)
+                    reg = {'json': oc}
+                    reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, **reg)
+                # Удаляем информацию о странице из реквеста
+                request.POST._mutable = True
+                del request.POST['page']
+                request.POST['object_code'] = code
+                request.POST._mutable = False
+            else:
+                message_class = 'text-red'
+                message += '<br>Объект не сохранен'
 
         # Кнопка "Удалить"
         elif 'b_delete' in request.POST:
             # Выделен ли объект
-            if 'i_code' in request.POST and request.POST['i_code']:
-                objects_delete = DictObjects.objects.filter(code=request.POST['i_code'],
-                                                        parent_structure_id=dict_id)
-                # Регистрация
-                incoming = {'class_id': dict_id, 'location': current_dict['default'], 'type': 'dict', 'code': code,
-                            'parent_code': parent_code}
-                # регистрируем удаление реквизитов
-                transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'dict')
-                for od in objects_delete:
-                    ic = incoming.copy()
-                    ic['id'] = od.id
-                    ic['name'] = od.name_id
-                    ic['value'] = od.value
-                    reg = {'json_income': ic, 'jsone_string_income': None}
-                    reg_funs.simple_reg(request.user.id, 16, timestamp, transact_id, **reg)
-                # регистрируем удаление объекта
-                reg = {'json_income': incoming}
-                reg_funs.simple_reg(request.user.id, 8, timestamp, transact_id, **reg)
-                # Удаляем
-                objects_delete.delete()
-                message = 'Объект успешно удален.<br>Код объекта: ' + request.POST['i_code'] + '<br>'
+            if code:
+                objects_delete = DictObjects.objects.filter(code=code,parent_structure_id=dict_id)
+                if objects_delete:
+                    # Регистрация
+                    incoming = {'class_id': dict_id, 'location': current_dict['default'], 'type': 'dict', 'code': code}
+                    # регистрируем удаление реквизитов
+                    transact_id = app.functions.reg_funs.get_transact_id(dict_id, code, 'dict')
+                    for od in objects_delete:
+                        ic = incoming.copy()
+                        ic['id'] = od.id
+                        ic['name'] = od.name_id
+                        ic['value'] = od.value
+                        reg = {'json_income': ic, 'jsone_string_income': None}
+                        reg_funs.simple_reg(request.user.id, 16, timestamp, transact_id, **reg)
+                    # регистрируем удаление объекта
+                    reg = {'json_income': incoming}
+                    reg_funs.simple_reg(request.user.id, 8, timestamp, transact_id, **reg)
+                    # Удаляем
+                    objects_delete.delete()
+                    message = 'Объект успешно удален.<br>Код объекта: ' + request.POST['i_owner'] + '<br>'
+                else:
+                    message = 'Объекта с указанным кодом нет в системе<br>'
             else:
-                message = 'Вы не выбрали объект для удаления'
+                message = 'Вы не выбрали объект для удаления<br>'
 
         # Вывод
-        name_rec = Dictionary.objects.filter(parent_id=dict_id)
-        if name_rec:    name_id = name_rec[0].id
-        else:   name_id = 0
-        objects_name = DictObjects.objects.filter(parent_structure_id=dict_id, name_id=name_id).order_by('-code')
-
-        # Фильтры
-        # По айди объекта
-        if 'object_code' in request.POST:
-            objects_name = objects_name.filter(code=int(request.POST['object_code']))
-        # Поиск по названию и коду объекта
-        elif 'input_search' in request.POST and request.POST['input_search']:
-            search_data = request.POST['input_search']
-            list_search_data = search_data.split()
-            try:  # пытаемся получить ID товара
-                num_search = int(search_data)
-            except ValueError:
-                num_search = 0
-            objects_name = objects_name.filter((reduce(operator.or_, (Q(value__icontains=x) for x in list_search_data)))
-                                 | Q(code=num_search)).order_by('-id')
-
-        # фильтр по собственнику (для массивов)
-        # if 'input_owner' in request.POST and request.POST['input_owner']:
-        #     subname_id = Designer.objects.get(parent_id=dict_id, is_required=True, name='Собственник').id
-        #     sub = Objects.objects.filter(parent_structure_id=dict_id, name_id=subname_id, code=OuterRef('code'))
-        #     objects_name = objects_name.annotate(owner=Subquery(sub.values('value')[:1]))
-        #     objects_name = objects_name.filter(owner=request.POST['input_owner'])
+        object_codes = DictObjects.objects.filter(parent_structure_id=dict_id)
+        object_codes, search_filter = interface_funs.sandf(request, object_codes, headers, None, None)
 
         # Пагинация и конвертация
         q_items = int(request.POST['q_items_on_page']) if 'q_items_on_page' in request.POST else 10
         page_num = int(request.POST['page']) if 'page' in request.POST and request.POST['page'] else 1
-        paginator = common_funs.paginator_object(objects_name, q_items, page_num)
+        object_codes = object_codes.values('code').distinct().order_by('-code')
+        paginator = common_funs.paginator_object(object_codes, q_items, page_num)
         dict_objects = DictObjects.objects.filter(code__in=paginator['items_codes'], parent_structure_id=dict_id)
         dict_objects = convert_funs.queyset_to_object(dict_objects)
         dict_objects.sort(key=lambda x: x['code'], reverse=True)
-        headers = request.session['temp_object_manager']['headers']
+
         for h in headers:
             if h['formula'] == 'link':
                 match = re.match(r'^(table|contract)\.(\d+)\.(\d*)$', h['default'])
@@ -1461,7 +1417,8 @@ def dictionary(request):
             'parent_id': current_dict['parent_id'],
             'timeline_to': timeline_to.strftime('%Y-%m-%dT%H:%M:%S'),
             'timeline_from': timeline_from.strftime('%Y-%m-%dT%H:%M:%S'),
-            'db_loc': 'd'
+            'db_loc': 'd',
+            'search_filter': search_filter,
         }
         return render(request, 'objects/dictionary.html', ctx)
     else:

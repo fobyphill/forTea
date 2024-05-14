@@ -87,7 +87,7 @@ def edit_object(request):
     else:
         return HttpResponse('Вы не авторизованы. Пожалуйста авторизуйтесь')
 
-# Получить объект. Три обязательных параметра: class_id, code, location = ['table', 'contract', 'dict']
+# Получить объект. Три обязательных параметра: class_id, code, location = ['table', 'contract', 'dict', 'tp']
 @view_procedures.is_auth
 def get_object(request):
     is_valid, message, class_id, code, location = interface_funs.valid_api_data(request)
@@ -308,12 +308,15 @@ def login(request):
     if request.user.is_authenticated:
         return HttpResponse(request.COOKIES['csrftoken'])
     else:
-        user = auth.authenticate(username=request.GET['login'], password=request.GET['password'])
-        if user:
-            auth.login(request, user)
-            return HttpResponse(request.COOKIES['csrftoken'])
+        if 'login' in request.GET and 'password' in request.GET:
+            user = auth.authenticate(username=request.GET['login'], password=request.GET['password'])
+            if user:
+                auth.login(request, user)
+                return HttpResponse(request.COOKIES['csrftoken'])
+            else:
+                return HttpResponse('Логин и пароль некорректны')
         else:
-            return HttpResponse('Логин и пароль некорректны')
+            return HttpResponse('Не указан логин или пароль')
 
 
 def logout(request):

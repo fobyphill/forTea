@@ -36,7 +36,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                     if not object:
                         return 'Ошибка. Некорректно указан код контракта ID: ' + str(alm['contract'])
                     headers = Contracts.objects.filter(parent_id=alm['contract']).exclude(system=True).values()
-                    object = convert_funs2.get_full_object(object, headers)
+                    object = convert_funs2.get_full_object(object, headers, 'contract')
                 elif type(alm['code']) is list:
                     object = alm['code'][0]
                     code = object['code']
@@ -60,7 +60,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                     params[str(p['id'])] = val
                 result = api_funs.edit_object(alm['contract'], code, user_id, 'contract', None,
                                               *list_contracts, **params)
-                if type(result) is str:
+                if type(result) is str and result.lower()[:6] == 'ошибка':
                     return result
             # для нового объекта
             elif alm['method'] == 'new':
@@ -74,30 +74,18 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
             elif alm['method'] == 'wo':
                 # Попытка списать все параметры одной транзакцией
                 objs = []
-                if alm['wo_params']['lifo']:    alm['code'].reverse()
                 old_params = alm['code']
                 if not old_params:  return 'Ошибка. Некорректно задана формула для кода объекта списания. ' +\
                                                'ID контракта' + str(alm['contract'])
                 for p in alm['params']:
-                    match_limit = re.match(r'([ltegn]{2})((?:\-|)\d+)', p['limit'])
-                    limit_sign = match_limit[1]
-                    limit_val = int(match_limit[2])
-                    if limit_sign == 'gt':
-                        limit_val += 1
-                    elif limit_sign == 'lt':
-                        limit_val -= 1
                     # прямое списание
                     if p['value'] >= 0:
                         for op in old_params:
-                            val = op[p['id']]['value']
-                            if alm['wo_params']['sign'] == '+':
-                                if val >= limit_val:
-                                    continue
-                                val += p['value']
-                            else:
-                                if val <= limit_val:
-                                    continue
-                                val -= p['value']
+                            old_val = op[p['id']]['value'] if op[p['id']]['value'] else 0
+                            val = old_val
+                            if val <= p['limit']:
+                                continue
+                            val -= p['value']
                             try:
                                 obj = next(o for o in objs if o['code'] == op['code'])
                             except StopIteration:
@@ -105,16 +93,13 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                                 obj['code'] = op['code']
                                 objs.append(obj)
                             # исчерпывающее списание
-                            if convert_procedures.do_logical_compare(val, limit_sign, limit_val):
+                            if val >= p['limit']:
                                 obj[str(p['id'])] = val
                                 break
                             # недостаточное списание
                             else:
-                                obj[str(p['id'])] = limit_val
-                                if alm['wo_params']['sign'] == '+':
-                                    p['value'] += op[p['id']]['value']
-                                else:
-                                    p['value'] -= op[p['id']]['value']
+                                obj[str(p['id'])] = p['limit']
+                                p['value'] -= old_val - p['limit']
                         else:
                             return 'Ошибка. Недостаточное количество для списания. ID параметра ' + str(p['id'])
                     # Обратное списание
@@ -126,9 +111,8 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                         if not hist:
                             return 'Ошибка. Нет истории списания. Возврат объекта невозможен'
                         # добавим в массив дельты
-                        mnoj = 1 if alm['wo_params']['sign'] == '-' else -1
                         for h in hist:
-                            h.delta = (h.json_income['value'] - h.json['value']) * mnoj
+                            h.delta = (h.json_income['value'] - h.json['value'])
                         # Приведем историю к нормальному виду,
                         # т.е. избавимся от минусовых значений методом обратного списания (положи туда, где взял)
                         i = 0
@@ -167,15 +151,14 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                             # полное начисление
                             pid = str(p['id'])
                             if p['value'] * -1 <= h.delta:
-                                new_val = p['value'] * -1 * mnoj
+                                new_val = p['value'] * -1
                                 if pid in obj:
                                     obj[pid] += new_val
                                 else:   obj[pid] = new_val + old_obj.value
                                 break
                             else:
-                                new_val = h.delta * mnoj
-                                if pid in obj:  obj[pid] += new_val
-                                else:   obj[pid] = new_val + old_obj.value
+                                if pid in obj:  obj[pid] += h.delta
+                                else:   obj[pid] = h.delta + old_obj.value
                                 p['value'] += h.delta
 
                 # Занесем списанные значение в БД
@@ -184,7 +167,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                     del o['code']
                     result = api_funs.edit_object(alm['contract'], code, user_id, 'contract', None,
                                                   *list_contracts, **o)
-                    if type(result) is str:
+                    if type(result) is str and result.lower()[:6] == 'ошибка':
                         return result
             else:
                 return 'Ошибка в линкмапе'
@@ -201,6 +184,66 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
 # Упаковать линкМап. Собирает в массив данные из поля ЛинкМап
 # kwargs = {mode: c/e (create/edit)}
 def pack_linkmap(linkmap, objects, edit_objs, user_id):
+    list_triggers = []
+    for lm in linkmap['value']:
+        dict_trigger = {}
+        dict_trigger['method'] = 'edit'
+        dict_trigger['contract'] = lm['contract']
+        code = None
+        if lm['new_code']:
+            dict_trigger['method'] = 'new'
+        try:
+            code = int(lm['code'])
+        except ValueError:
+            # Если в качестве кода задана формула, возвращающая массив данных
+            match_formula = re.search(r'(\[\[(?:.*?(?:\[\[.*?\]\]|))+?\]\])', lm['code'], re.S)
+            if match_formula:
+                header = deepcopy(linkmap)
+                header['value'] = 'result = ' + match_formula[1]
+                convert_funs.deep_formula(header, objects, user_id, True)
+                code = objects[0][linkmap['id']]['value']
+                if not type(code) is list:
+                    return False
+                del objects[0][linkmap['id']]
+                # Если не нашлось объектов по требуемым условиям и нет условия "Найти или создать", то вернуть ошибку
+                if not code:
+                    if dict_trigger['method'] != 'new':
+                        return False
+                else:
+                    dict_trigger['method'] = 'edit'
+            elif dict_trigger['method'] != 'new':
+                return False
+        dict_trigger['code'] = code
+
+        # Списание
+        if lm['writeoff']:
+            dict_trigger['method'] = 'wo'
+            if not dict_trigger['code'] or type(dict_trigger['code']) is not list:
+                return False
+            # допилить код. если нет или не список - вернуть ложь
+        dict_trigger['params'] = []
+        for lmp in lm['params']:
+            dict_params = {'id': lmp['id']}
+            if 'sign' in lmp:
+                dict_params['sign'] = lmp['sign']
+            elif lm['writeoff']:
+                dict_params['sign'] = '-'
+            else:
+                dict_params['sign'] = 'e'
+            if 'limit' in lmp:
+                dict_params['limit'] = lmp['limit']
+            header = deepcopy(linkmap)
+            header['value'] = lmp['value']
+            objs = objects if dict_params['sign'] == 'e' else edit_objs
+            convert_funs.deep_formula(header, objs, user_id, True)
+            dict_params['value'] = objs[0][linkmap['id']]['value']
+            del objs[0][linkmap['id']]
+            dict_trigger['params'].append(dict_params)
+        list_triggers.append(dict_trigger)
+    return list_triggers
+
+
+def old_pack_linkmap(linkmap, objects, edit_objs, user_id):
     flags = re.IGNORECASE
     str_linkmap = re.sub('\n', '', linkmap['value'])
     array_trigger_params = re.findall(r'.+?(?:\;|$)', str_linkmap, flags=flags)
@@ -318,7 +361,8 @@ def do_business_rule(biz_rule_header, presaved_object, user_id):
 
 # dcsp - do_contract_system_params
 # Возвращает строку. Если все ок - вернет ок. Если есть текст - это текст ошибки
-def dcsp(contract_id, code, headers, user_id, dict_object, dict_edit_object, timestamp, parent_transact, *list_contracts, **params):
+def dcsp(contract_id, code, headers, user_id, dict_object, dict_edit_object, timestamp, parent_transact,
+         *list_contracts, **params):
     def make_error(txt):
         raise Exception(txt)
     # Проверка цикличности
@@ -335,8 +379,9 @@ def dcsp(contract_id, code, headers, user_id, dict_object, dict_edit_object, tim
     # 1. отработаем бизнес-правило
     biz_rule = next(sp for sp in system_params if sp['name'] == 'business_rule')
     old_obj = ContractCells.objects.filter(parent_structure_id=contract_id, code=code)
-    # tps = params['tps'] if "tps" in params else None
     presaved_object = app.functions.interface_procedures.mofr(code, contract_id, headers, dict_object, old_obj, True)
+    if 'tps' in params and params['tps']:
+        presaved_object['tps'] = params['tps']
     if not do_business_rule(biz_rule, presaved_object, user_id):
         return 'Ошибка. Не выполняется бизнес-правило контракта<br>'
 

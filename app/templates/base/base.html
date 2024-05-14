@@ -45,11 +45,14 @@
         <div class="content-wrapper no-sidebar" style="margin-top: 10px">
 
             <!-- Main content -->
+            {% load l10n %}
+            {% localize off %}
             <section class="content">
                 <div class="container-fluid">
                     {% block content %}{% endblock %}
                 </div>
             </section>
+            {% endlocalize %}
             <!-- /.content -->
         </div>
         <!-- /.content-wrapper -->

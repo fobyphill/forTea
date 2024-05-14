@@ -52,6 +52,7 @@ def filter_branches(branch, key, value, **params):
     for b in branch:
         if is_part:
             if b[key].lower().find(value.lower()) != -1:
+                b['opened'] = False
                 result.append(b)
         elif b[key] == value:
             result.append(b)
@@ -141,7 +142,13 @@ def get_branch_props(branch, class_id, headers, user_id, is_contract=False, **pa
     if prop:  # вставили последний набор свойств
         list_props.append(prop)
     # Добавим специфические поля
-    hwp = [h for h in headers if h['name'] != 'parent']  #  hwp - headers without parent
+    hwp = []
+    for h in headers:
+        if h['name'] != 'parent':
+            copyh = h.copy()
+            copyh['is_visible'] = True
+            hwp.append(copyh)
+    # hwp = [h for h in headers if h['name'] != 'parent']  #  hwp - headers without parent
     child_class = params['child_class'] if 'child_class' in params else None
     convert_funs.prepare_table_to_template(hwp, list_props, user_id, is_contract, child_class=child_class)
     # Вбросим их в ветку

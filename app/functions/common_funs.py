@@ -83,6 +83,7 @@ def paginator_object(items, q_items_on_page=10, page_num=1):
     }
     return ctx_pagination
 
+
 # Обрезка лишних данных в адресе
 def edit_url(request):
     url = re.sub(r'&page=.*&', '&', request.META['QUERY_STRING']) # о странице

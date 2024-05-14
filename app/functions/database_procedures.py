@@ -19,14 +19,12 @@ def get_class_type(id, is_contract=True):
 # Удалить все словари, связанные с объектом
 # Вход - код родительского объекта, айдти родительского словаря
 # Выход - Да/ Нет
-def delete_dict_records(parent_code, parent_structure_id, user_id, timestamp=None, parent_transaction_id=None):
+def delete_dict_records(code, parent_structure_id, user_id, timestamp=None, parent_transaction_id=None):
     dict_del = DictObjects.objects.filter(parent_structure_id=parent_structure_id,
-                                          parent_code=parent_code)
+                                          code=code)
     if dict_del:
-        code = dict_del[0].code
         current_dict = Dictionary.objects.get(id=parent_structure_id)
-        incoming = {'class_id': parent_structure_id, 'location': current_dict.default, 'type': 'dict',
-                    'parent_code': parent_code, 'code': code}
+        incoming = {'class_id': parent_structure_id, 'location': current_dict.default, 'type': 'dict', 'code': code}
         transaction_id = reg_funs.get_transact_id(parent_structure_id, code, 'd')
         if not timestamp:   timestamp = datetime.now()
         # регистрация удаления реквизитов

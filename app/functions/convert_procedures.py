@@ -4,7 +4,8 @@ import re, datetime
 # процедура нахождения маркера юзера
 from operator import itemgetter, or_, and_
 
-from django.db.models import Sum, Avg, Max, Min
+from django.db.models import Sum, Avg, Max, Min, FloatField
+from django.db.models.functions import Cast
 
 from app.functions import tree_funs
 from app.models import Contracts, ContractCells, Objects, Designer
@@ -185,7 +186,10 @@ def sobah(objs, array_headers):
         obj_keys = objs[0].keys()
         array_headers = [ah for ah in array_headers if ah[0] in obj_keys]
         for k, r in reversed(array_headers):
-            objs.sort(key=lambda x: x[k]['value'], reverse=r)
+            if type(objs[0][k]['value']) is dict:
+                objs.sort(key=lambda x: x[k]['value']['datetime_create'])
+            else:
+                objs.sort(key=lambda x: x[k]['value'], reverse=r)
     return objs
 
 # gc1b - get codes one branch
@@ -250,3 +254,45 @@ def ficoitch(h):
             val = int(h['value'][6:])
             const_manager = Designer.objects
         h['const'] = list(const_manager.filter(parent_id=val).values('id', 'name', 'value'))
+
+
+def str_datetime_to_rus(str_datetime):
+    return str_datetime[8:10] + '.' + str_datetime[5:7] + '.' + str_datetime[:4] + ' ' + str_datetime[11:]
+
+# gtfol = get totals from object list
+def gtfol(objects, visible_headers, is_contract=False):
+    manager = ContractCells.objects if is_contract else Objects.objects
+    totals = {}
+    dict_totals = {'max': 'Макс', 'min': 'Мин', 'sum': 'Сум', 'avg': 'СрЗнач',
+                   'count': 'Колво' }
+    for vh in visible_headers:
+        if vh['formula'] == 'float' and vh['settings'] and 'totals' in vh['settings'] and vh['settings']['totals']:
+            all_this_req = manager.filter(parent_structure_id=vh['parent_id'], name_id=vh['id'], value__isnull=False) \
+                .annotate(val=Cast('value', output_field=FloatField()))
+            page_list = [o[vh['id']]['value'] for o in objects if vh['id'] in o and o[vh['id']]['value'] != None]
+            for tot in vh['settings']['totals']:
+                rus_tot = dict_totals[tot]
+                if not rus_tot in totals:
+                    totals[rus_tot] = {}
+
+                if tot == 'max':
+                    full_tot = all_this_req.aggregate(tot=Max('val'))
+                    page_tot = max(page_list)
+                elif tot == 'min':
+                    full_tot = all_this_req.aggregate(tot=Min('val'))
+                    page_tot = min(page_list)
+                elif tot == 'avg':
+                    full_tot = all_this_req.aggregate(tot=Avg('val'))
+                    page_tot = sum(page_list) / len(page_list) if page_list else 0
+                elif tot == 'sum':
+                    full_tot = all_this_req.aggregate(tot=Sum('val'))
+                    page_tot = sum(page_list)
+                else:
+                    full_tot = {'tot': all_this_req.count()}
+                    page_tot = len(page_list)
+                full_tot = full_tot['tot'] if full_tot['tot'] else 0
+                page_tot = page_tot if page_tot else 0
+                totals[rus_tot][vh['id']] = {}
+                totals[rus_tot][vh['id']]['full'] = f'Всего: {full_tot:,.2f}'.replace(',', ' ')
+                totals[rus_tot][vh['id']]['page'] = f'На стр.: {page_tot:,.2f}'.replace(',', ' ')
+    return totals

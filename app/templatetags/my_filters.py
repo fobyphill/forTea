@@ -122,7 +122,7 @@ def json_loads(dict):
 @register.filter
 def datetime_string_to_russian(datetime_string):
     return datetime_string[8:10] + '.' + datetime_string[5:7] + '.' + datetime_string[:4] + ' ' + datetime_string[11:13]\
-        + ':' + datetime_string[14:]
+        + ':' + datetime_string[14:] if datetime_string else ''
 
 
 # Конвертим строку в дату российского формата д.м.Г

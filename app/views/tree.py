@@ -1,11 +1,12 @@
 from datetime import datetime
 
+from dateutil.relativedelta import relativedelta
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpResponse
 from django.shortcuts import render
 from app.functions import view_procedures, session_funs, database_funs, reg_funs, tree_funs, interface_funs, \
-    convert_procedures, convert_funs
-from app.models import Contracts, Designer, ContractCells, Objects
+    convert_procedures, convert_funs, hist_funs
+from app.models import Contracts, Designer, ContractCells, Objects, RegistratorLog
 
 
 @view_procedures.is_auth_app
@@ -59,12 +60,15 @@ def tree(request):
         branch = tree_funs.find_branch(tree, 'code', code)
         if not branch:
             branch = tree_funs.antt(code, tree, class_id, headers, request.user.id, is_contract)
+    elif tree:
+        branch = tree[0]
     else:
         branch = None
 
+
     # Кнопка "Сохранить"
     if 'b_save' in request.POST:
-        dict_params = {'string': 'ta_string_', 'float': 'i_float_', 'link': 'i_link_', 'datetime': 'i_datetime_',
+        dict_params = {'string': 'ta_', 'float': 'i_float_', 'link': 'i_link_', 'datetime': 'i_datetime_',
                        'date': 'i_date_', 'enum': 's_enum_', 'const': 's_alias_'}
 
         def validation():
@@ -141,7 +145,7 @@ def tree(request):
             param_name.save()
             # регистрация
             location = 'contract' if is_contract else 'table'
-            incoming = {'class_id': class_id, 'location': location, 'type': 'tree', 'id': param_name.id,
+            incoming = {'class_id': class_id, 'code': code, 'location': location, 'type': 'tree', 'id': param_name.id,
                         'name': header_name['id'], 'value': old_name}
             outcoming = incoming.copy()
             outcoming['value'] = param_name.value
@@ -410,6 +414,7 @@ def tree(request):
 
     # Фильтрация
     fnd_tree = []
+    show_find_result = False
     if 'input_search' in request.POST and request.POST['input_search']:
         try:
             search_code = int(request.POST['input_search'])
@@ -439,12 +444,46 @@ def tree(request):
                     else:
                         is_done = True
                         branch = None
-
-        fnd_tree += tree_funs.filter_branches(tree, 'name', request.POST['input_search'], is_part=True)
+        else:
+            show_find_result = True
+            fnd_tree += tree_funs.filter_branches(tree, 'name', request.POST['input_search'], is_part=True)
     # Добавим Заголовки первых четырех видимых параметров
     visible_headers = [h for h in request.session['temp_object_manager']['headers'] if h['is_visible']][:4]
-    # добавим свойства для дерева
 
+    # данные для таймлайна
+    if 'date_to' in request.POST and request.POST['date_to']:
+        str_date_to = request.POST['date_to']
+        date_to = datetime.strptime(str_date_to, '%Y-%m-%dT%H:%M')
+    else:
+        date_to = timestamp
+        str_date_to = datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
+    if 'date_from' in request.POST and request.POST['date_from']:
+        str_date_from = request.POST['date_from']
+        date_from = datetime.strptime(str_date_from, '%Y-%m-%dT%H:%M')
+    else:
+        date_from = date_to - relativedelta(months=1)
+        str_date_from = datetime.strftime(date_from, '%Y-%m-%dT%H:%M')
+    if date_to < date_from:
+        date_to, date_from = date_from, date_to
+
+
+
+    timeline = hist_funs.roh(class_id, branch['code'], location, date_from, date_to,
+                             request.session['temp_object_manager'])
+    if timeline['timeline']:
+        last_event = convert_procedures.str_datetime_to_rus(timeline['timeline'][-1]['date_update']) + \
+                     ' ' + timeline['timeline'][-1]['user']
+    else:
+        last_rec = RegistratorLog.objects.filter(reg_name_id__in=(13, 15), json_class=class_id,
+                                                 json__code=branch['code'],
+                                                 json__type='tree', json__location=location).order_by('-date_update') \
+                       .select_related('user').values('date_update', 'user__first_name', 'user__last_name')[:1]
+        last_event = datetime.strftime(last_rec[0]['date_update'], '%d.%m.%Y %H:%M:%S') + ' ' + \
+                     last_rec[0]['user__first_name'] + ' ' + last_rec[0]['user__last_name'] if last_rec else ''
+    page_quantity = int(int(len(timeline['timeline']) - 1) / 10 + 1)
+    max_pos = 9 if page_quantity > 1 else len(timeline['timeline']) - 1
+    timeline_data = {'last_event': last_event, 'date_from': str_date_from, 'date_to': str_date_to,
+                     'timeline_array': timeline, 'page_quantity': page_quantity, 'max_pos': max_pos}
     session_funs.crqd(request, is_contract)  # контрольный пересчет количества черновиков
     ctx = {
         'title': title,
@@ -452,8 +491,10 @@ def tree(request):
         'message_class': message_class,
         'branch': branch,
         'fnd_tree': fnd_tree,
+        'show_find_result': show_find_result,
         'visible_headers': visible_headers,
         'is_contract': is_contract,
-        'db_loc': location[0]
+        'db_loc': location[0],
+        'timeline_data': timeline_data
     }
     return render(request, 'objects/tree.html', ctx)

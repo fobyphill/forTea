@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Subquery
+from django.db.models import Subquery, Q
 from django.db.models.fields.json import KeyTextTransform
 
 from app.functions import convert_funs
@@ -71,6 +71,8 @@ def gov(class_id, code, location, timestamp, tom, user_id, **params):
                 else:
                     delay = None
             object[h['id']] = {'type': h['formula'], 'value': val, 'delay': delay}
+            if location in ('tp', 'dict'):
+                del object[h['id']]['delay']
     # заполним информацию о константах
     is_contract = True if location == 'contract' else False
     convert_funs.prepare_table_to_template([h for h in headers if h['formula'] == 'const'], (object,), user_id,
@@ -82,11 +84,14 @@ def gov(class_id, code, location, timestamp, tom, user_id, **params):
             dict_id = 'dict_' + str(md['id'])
             object[dict_id] = {}
             for ch in md['children']:
-                hist_prop = RegistratorLog.objects.filter(json_class=md['id'], json__type='dict',
-                                                          reg_name_id__in=(13, 15),
-                                                          json__parent_code=code, json__name=ch['id'],
-                                                          date_update__lt=timestamp).order_by('-date_update')[:1]
+                q_exist = Q(json_class=md['id'], json__type='dict', reg_name_id__in=(13, 15),
+                            json__code=code, json__name=ch['id'], date_update__lt=timestamp)
+                q_delete = Q(json_class=md['id'], json_income__type='dict', reg_name_id=16, json_income__code=code,
+                             json_income__name=ch['id'], date_update__lt=timestamp)
+                hist_prop = RegistratorLog.objects.filter(q_exist | q_delete).order_by('-date_update')[:1]
                 if hist_prop:
+                    if hist_prop[0].reg_name_id == 16:
+                        break
                     object[dict_id][ch['id']] = {'type': ch['formula'], 'value': hist_prop[0].json['value'],
                                                  'name': ch['name']}
             if not object[dict_id]:
@@ -142,10 +147,12 @@ def roh(class_id, code, location, date_from, date_to, tom, **params):
     last_date_dicts = []
     if location != 'dict' and children:
         for md in tom['my_dicts']:
+            query_create_edit = Q(json__type='dict', json__code=code, json_class=md['id'], json__location=location,
+                                   reg_name_id__in=(13, 15))
+            query_delete = Q(json_income__type='dict', json_income__code=code, json_class=md['id'],
+                             json_income__location=location, reg_name_id=8)
             # Современное значение словаря
-            list_history_dict_base = RegistratorLog.objects.filter(json__type='dict', json__parent_code=code,
-                                                                   json_class=md['id'], json__location=location,
-                                                                   reg_name_id__in=(13, 15))
+            list_history_dict_base = RegistratorLog.objects.filter(query_create_edit | query_delete)
             list_history_dict = list_history_dict_base.filter(date_update__gte=date_from, date_update__lte=date_to) \
                 .select_related('user').values('date_update', 'user__first_name', 'user__last_name').distinct()
             q_hist += [lhd for lhd in list_history_dict if not lhd in q_hist]

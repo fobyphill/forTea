@@ -1,18 +1,35 @@
 <div id="div_tl_hist">
     <div class="input-group">
         <span class="input-group-text">Версия</span>
-        <span class="form-control" id="s_hist_range"></span>
+        <span class="form-control" id="s_hist_range">{{ timeline_data.last_event }}</span>
 
     </div>
     <div class="input-group mb-3">
         <span class="input-group-text">От</span>
-        <input type="datetime-local" id="i_timeline_from" class="form-control" step="1">
+        <input type="datetime-local" id="i_timeline_from" class="form-control" step="1" value="{{ timeline_data.date_from }}">
         <span class="input-group-text">До</span>
-        <input type="datetime-local" id="i_timeline_to" class="form-control" step="1">
+        <input type="datetime-local" id="i_timeline_to" class="form-control" step="1" value="{{ timeline_data.date_to }}">
         <button type="button" class="btn btn-outline-secondary"
                 onclick="change_timeline_interval()">Обновить таймлайн</button>
         <input type="range" class="form-control-range" id="i_hist_range" onchange="moove_time()"
-               value="1" max="1" list="steplist">
-        <datalist id="steplist"></datalist>
+               value="{{ timeline_data.max_pos }}" max="{{ timeline_data.max_pos }}" list="steplist">
+        <datalist id="steplist">
+            {% for i in '123456789'|make_list %}
+                {% if forloop.counter <= timeline_data.max_pos %}
+                    <option>{{ forloop.counter }}</option>
+                {% endif %}
+            {% endfor %}
+        </datalist>
     </div>
+    {% if timeline_data.page_quantity > 1 %}
+        <div id="div_timeline_pagination" class="text-center mb-3">
+            <button class="like-a" id="b_tl_begin" onclick="go_timeline_page({{ timeline_data.page_quantity }})">
+                &nbsp;&lt;&lt;&nbsp;</button>
+            <button class="like-a" id="b_tl_prev" onclick="go_timeline_page(2)">&nbsp;&lt;&nbsp;</button>
+            <span id="s_tl_pagination_info"> Страница
+                <span id="s_tl_page_num">1</span> из <span id="s_tl_page_quantity">{{ timeline_data.page_quantity }}</span></span>
+            <button class="tag-invis" id="b_tl_next">&nbsp;&gt;&nbsp;</button>
+            <button class="tag-invis" id="b_tl_end" onclick="go_timeline_page(1)">&nbsp;&gt;&gt;&nbsp;</button>
+        </div>
+    {% endif %}
 </div>

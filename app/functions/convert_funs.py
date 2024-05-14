@@ -20,15 +20,16 @@ from app.models import Designer, Objects, Contracts, ContractCells, DictObjects,
 # Массив должен быть упорядоченным по  code, name_id
 # Выход - стандартный список словарей
 def queyset_to_object(objects):
-    objects = objects.order_by('code', 'name_id')
+    if objects:
+        name_code = 'code' if hasattr(objects[0], 'code') else 'parent_code'
+        objects = objects.order_by(name_code, 'name_id')
     result_json = []
     for o in objects:
+        code = o.code if hasattr(o, 'code') else o.parent_code
         try:
-            dict = next(rj for rj in result_json if rj['code'] == o.code)
+            dict = next(rj for rj in result_json if rj['code'] == code)
         except StopIteration:
-            dict = {'code': o.code, 'parent_structure': o.parent_structure_id, 'type': o.parent_structure.formula}
-            if hasattr(o, 'parent_code'):
-                dict['parent_code'] = o.parent_code
+            dict = {'code': code, 'parent_structure': o.parent_structure_id, 'type': o.parent_structure.formula}
             result_json.append(dict)
         dict[o.name_id] = {'id': o.id, 'name': o.name.name, 'type': o.name.formula, 'value': o.value}
         if hasattr(o, 'delay'):
@@ -222,23 +223,29 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
             return '\'Ошибка. Ссылка некорректна\'', False
         return deep_object, is_link_contract
 
-    def get_tp(array, **opt_params):
+    def get_tp(obj, array, **opt_params):
         if len(array) != 4:
             return 'Ошибка. Некорректно задана формула техпроцесса'
         tp_id = int(array[1])
         code = int(array[2])
         name_id = int(array[3])
         data_kind = opt_params['type_value']
-        try:
-            my_tp = TechProcessObjects.objects.get(parent_structure_id=tp_id, name_id=name_id, parent_code=code)
-        except ObjectDoesNotExist:
-            return 'Ошибка. Данные техпроцесса некорректны. Не найден объект'
-        if data_kind == 'fact':
-            return my_tp.value['fact']
-        elif data_kind == 'delay':
-            return sum(d['value'] for d in my_tp.value['delay'])
+        if 'tps' in obj and obj['tps'] and obj['tps'] and tp_id in obj['tps'] and name_id in obj['tps'][tp_id]:
+            my_tp = obj['tps'][tp_id][name_id]
+            return my_tp[data_kind]
         else:
-            return sum(d['value'] for d in my_tp.value['delay']) + my_tp.value['fact']
+            try:
+                my_tp = TechProcessObjects.objects.get(parent_structure_id=tp_id, name_id=name_id, parent_code=code)
+            except ObjectDoesNotExist:
+                return 'Ошибка. Данные техпроцесса некорректны. Не найден объект'
+            if data_kind == 'fact':
+                return my_tp.value['fact']
+            elif data_kind == 'delay':
+                return sum(d['value'] for d in my_tp.value['delay'])
+            else:
+                fact = my_tp.value['fact'] if my_tp.value['fact'] else 0
+                return sum(d['value'] for d in my_tp.value['delay']) + fact
+
 
     # Получим все переменные в виде списка словарей
     dict_foreign_formuls = {}
@@ -334,7 +341,7 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                                         value_var = tree_funs.glwt(header['parent_id'], parent_branch.value, is_contract)
                         # Если имеем дело с техпроцессом
                         elif v[0].lower() == 'tp':
-                            value_var = get_tp(v, **opt_params)
+                            value_var = get_tp(o, v, **opt_params)
                         # Если формула внешняя - получим  значение переменной
                         elif v[0].lower() in ('table', 'contract'):
                             value_var = foreign_link(v, user_id, *link_chain, is_draft=is_draft, **opt_params)
@@ -473,7 +480,8 @@ def prepare_table_to_template(headers, objects, user_id, is_contract=False, **pa
         elif h['formula'] == 'array':
             owners = [o['code'] for o in objects]
             class_manager = Contracts.objects if is_contract else Designer.objects
-            headers_array = list(class_manager.filter(parent_id=h['id'], is_visible=True).order_by('priority').values()[:4])
+            headers_array = list(class_manager.filter(parent_id=h['id'], is_visible=True)\
+                                 .exclude(name='Собственник').order_by('priority').values()[:4])
             for ha in headers_array:
                 convert_procedures.ficoitch(ha)
             headers_ids = [ha['id'] for ha in headers_array]
@@ -496,11 +504,11 @@ def prepare_table_to_template(headers, objects, user_id, is_contract=False, **pa
 def add_dicts(objects, all_my_dicts):
     codes = [o['code'] for o in objects]
     for amd in all_my_dicts:
-        dicts = DictObjects.objects.filter(parent_code__in=codes, parent_structure_id=amd['id'])
+        dicts = DictObjects.objects.filter(code__in=codes, parent_structure_id=amd['id'])
         dicts = queyset_to_object(dicts)
         for o in objects:
             try:
-                d = next(d for d in dicts if d['parent_code'] == o['code'])
+                d = next(d for d in dicts if d['code'] == o['code'])
             except StopIteration:
                 o['dict_' + str(amd['id'])] = None
             else:
@@ -807,6 +815,9 @@ def foreign_link(array, user_id, *link_chain, **params):
                 # упорядочиваем
                 if 'order' in params:
                     objects = convert_procedures.sobah(objects, params['order'])
+                # выворачиваем
+                if 'lifo' in params:
+                    objects.sort(key=lambda x: x['code'], reverse=True)
                 return objects
             else:
                 return res
@@ -1641,11 +1652,9 @@ def get_opt_params(formula):
             else:
                 oh = int(oh)
             result['order'].append((oh, rev))
-
-    # Параметр write-off [lifo, fifo]
-    # find_lifo = re.search(r'\{\{.*write-off\s*=\s(lifo|fifo).*\}\}', formula, re.S)
-    # if find_lifo:
-    #     result['write-off'] = find_lifo[1]
+    # Параметр LIFO
+    if re.search(r'\{\{.*lifo.*\}\}', formula, re.S):
+        result['lifo'] = True
     return result
 
 

@@ -145,9 +145,9 @@ def paket_reg(list_regs):
     RegistratorLog.objects.bulk_create(list_save)
 
 
-def get_last_update(class_id, code, location='t'):
-    q_income = Q(json_class=class_id, json_income__code=code, json_income__location=location)
-    q_outcome = Q(json_class=class_id, json__code=code, json__location=location)
+def get_last_update(class_id, code, hist_type='table'):
+    q_income = Q(json_class=class_id, json_income__code=code, json_income__type=hist_type)
+    q_outcome = Q(json_class=class_id, json__code=code, json__type=hist_type)
     last_update = RegistratorLog.objects.filter(q_income | q_outcome).order_by('-id').values('date_update')[:1]
     if last_update:
         result = datetime.strftime(last_update[0]['date_update'], '%Y-%m-%dT%H:%M:%S')

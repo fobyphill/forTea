@@ -14,9 +14,9 @@
                     <th class="col text-center">По умолчанию</th>
                     <th class="col-0-5 text-center" style="word-wrap: normal">О</th>
                     <th class="col-0-5 text-center" style="word-wrap: normal">Т</th>
-                    {% if request.path == '/manage-class-tree' %}
-                        <th class="col-0-5 text-center" style="word-wrap: normal">D</th>
-                    {% endif %}
+{#                    {% if request.path == '/manage-class-tree' %}#}
+{#                        <th class="col-0-5 text-center" style="word-wrap: normal">D</th>#}
+{#                    {% endif %}#}
                 </tr>
             </thead>
             <tbody id="tree_body_params">
@@ -39,9 +39,9 @@
                     <td class="col text-center"></td>  {# тип-Значение- дефолт - заглушка #}
                     <td class="col-0-5"><input id="chb_tree_name_req" type="checkbox" checked="checked" onclick="return false"></td>
                     <td class="col-0-5"><input id="chb_tree_name_vis" type="checkbox" checked="checked" onclick="return false"></td>
-                    {% if request.path == '/manage-class-tree' %}
-                        <td class="col-0-5"><input id="chb_tree_name_delay" type="checkbox" onclick="return false"></td>
-                    {% endif %}
+{#                    {% if request.path == '/manage-class-tree' %}#}
+{#                        <td class="col-0-5"><input id="chb_tree_name_delay" type="checkbox" onclick="return false"></td>#}
+{#                    {% endif %}#}
                 </tr>
             </tbody>
         </table>

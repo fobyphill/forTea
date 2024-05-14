@@ -5,37 +5,28 @@
         <tr style="cursor: pointer;" class="row">
             <th class="col">Ветка</th>
             {% if visible_headers %}
-                {% for vh in visible_headers %}
-                    <th class="col-1-5 text-center">{{ vh.name }}</th>
+                {% for tvh in tree_visible_headers %}
+                    <th class="col-1-5 text-center">{{ tvh.name }}</th>
                 {% endfor %}
             {% endif %}
         </tr>
     </thead>
     <tbody>
         {% load l10n %}
-        {% for t in request.session.temp_object_manager.tree %}
-            {% with prefix='' %}
-                {% include 'objects/prop_node.html' %}
-            {% endwith %}
-            </tr>
-        {% endfor %}
-        {# Старый код. Удалить после того, как сделаю поиск #}
-{#                <ul id="ul_tree">#}
-{#                    {% if fnd_tree %}#}
-{#                        {% for ft in fnd_tree %}#}
-{#                            <li id="unit{{ ft.code }}" onclick="select_branch(this)"#}
-{#                                {% if ft.code == branch.code %}#}
-{#                                    class="table-active"#}
-{#                                {% endif %}#}
-{#                            ><img src="/static/img/pics/folder_closed_50.png" width=20px>{{ ft.code }} {{ ft.name }}</li>#}
-{#                        {% endfor %}#}
-{#                    {% else %}#}
-{#                        {% for t in request.session.temp_object_manager.tree %}#}
-{#                            {% with tags=t|gcft:branch %}#}
-{#                                {{ tags|safe }}#}
-{#                            {% endwith %}#}
-{#                        {% endfor %}#}
-{#                    {% endif %}#}
-{#                </ul>#}
+        {% if show_find_result %}
+            {% for t in fnd_tree %}
+                {% with prefix='' %}
+                    {% include 'objects/prop_node.html' %}
+                {% endwith %}
+                </tr>
+            {% endfor %}
+        {% else %}
+            {% for t in request.session.temp_object_manager.tree %}
+                {% with prefix='' %}
+                    {% include 'objects/prop_node.html' %}
+                {% endwith %}
+                </tr>
+            {% endfor %}
+        {% endif %}
     </tbody>
 </table>

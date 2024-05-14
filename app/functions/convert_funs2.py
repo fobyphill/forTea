@@ -23,7 +23,7 @@ def atptc(objects, tps):
 
 # Получаем объект в виде словаря. Вход - кверисет существующих реквизитов объекта, список заголовков
 # Получает только объекты следующих типов - словари, контракты, массивы, деревья
-def get_full_object(reqs, headers):
+def get_full_object(reqs, headers, location='table'):
     object = dict()
     if reqs and headers:
         object['code'] = reqs[0].code
@@ -34,10 +34,12 @@ def get_full_object(reqs, headers):
                 req = next(r for r in reqs if r.name_id == h['id'])
             except StopIteration:
                 object[h['id']]['value'] = None
-                object[h['id']]['delay'] = None
+                if location not in ('tp', 'dict'):
+                    object[h['id']]['delay'] = None
             else:
                 object[h['id']]['value'] = req.value
-                object[h['id']]['delay'] = req.delay
+                if location not in ('tp', 'dict'):
+                    object[h['id']]['delay'] = req.delay
     return object
 
 # pati = prepare_alias_to_interface
@@ -88,7 +90,6 @@ def pati(alias, **params):
                     val += ' list="dl_' + str(a['id']) + '_' + find_data[1] + '" oninput="promp_direct_link(this, \'' \
                            + link_location + '\', ' + link_class + ')"><datalist id="dl_' + str(a['id']) \
                            + '_' + find_data[1] + '"></datalist'
-
                 val += '></div>'
 
             str_is_contract = str(is_contract).lower()
