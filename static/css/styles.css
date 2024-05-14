@@ -78,9 +78,14 @@ input{outline:none;}
     display: inline;
 }
 .my-navbar {
-    display: flex;
+    display: inline-block;
     align-items: center;
 }
+
+body.iframe-mode .my-navbar{
+  display: none;
+}
+
 .my-nav-link {
     display: block;
     padding: .1rem 1rem;

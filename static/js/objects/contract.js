@@ -20,6 +20,7 @@ window.onload = function () {
             sao(tr[1], 'c', true)
     }
     start_popovers()
+    fill_search_filter()  // Заполним фильтры поиска
 }
 
 // новый объект
@@ -115,7 +116,7 @@ function new_obj() {
         }
         else current_node.val(dict.default)
         if (dict.formula === 'link')
-            get_link_ajax(current_node[0], true)
+            fast_get_link(current_node[0], 'c')
         // Заполним собственника для массивов
         let owner = $('input[name="input_owner"]')
         if (owner.length){

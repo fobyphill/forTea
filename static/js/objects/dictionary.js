@@ -10,23 +10,8 @@ window.onload = function () {
         }
         else sao(tr[1], 'd', true)
     }
+    fill_search_filter()
 }
-
-// function select_active_object(this_object) {
-//     if (this_object.parentElement.tagName !== 'THEAD' &&
-//         !($('#s_object_hist').html().length && this_object.classList.contains('table-active'))
-//     ) {
-//     let html_object = $('#json_object' + this_object.id)
-//     let json_object = JSON.parse(html_object.text())
-//         // Известим пользователя о том, что информация загружается
-//         $('#s_hist_range').text('Информация загружается')
-//         $('#i_hist_range').val('0').attr('max', '0')
-//         $('#s_current_version').text(html_object.text())
-//         fill_form(this_object)
-//         // Вызовем функцию, заполняющую историю объекта, ползунок, подпись и данные ползунка
-//         retreive_object_history(json_object)
-//     }
-// }
 
 function fill_form(this_object) {
     // Изменяем классы строк таблицы
@@ -98,12 +83,12 @@ function fill_form(this_object) {
 function new_obj(){
     // чистим
     $('.table-active').removeClass('table-active')
-    $('#i_code').val('')
     $("textarea[id*='ta_']").val('')
     $("input[id*='i_']").val('')
     $("input[id*='chb_']").attr('checked', false)
     $("span[id*='s_']").html('')
     $('#i_owner').removeAttr('readonly')
+    $('#b_save_dict').attr('onclick', 'send_form_with_param("b_new_dict")')
     // заполним дефолты
     $("span[id*='header_info']").toArray().forEach((elem) => {
         let id = elem.id.slice(11)
@@ -131,7 +116,7 @@ function new_obj(){
         }
         else current_node.val(dict.default)
         if (dict.formula === 'link')
-            get_link_ajax(current_node[0])
+            fast_get_link(current_node[0])
     })
     // Подсказка для собственника
     promp_owner($('#i_owner')[0])
@@ -186,4 +171,53 @@ function dict_link_promp(this_input, delay_promp=true){
     }
     else do_this()
 
+}
+
+// sdlp = search_dict_link_promp
+function sdlp(this_input){
+    function do_this(){
+        let code = this_input.value
+        let id = this_input.id.slice(2)
+        let header_info = JSON.parse($('#header_info' + id).text())
+        let match = header_info.default.match(/^(table|contract)\.(\d+)\./)
+        let datalist_id = this_input.getAttribute('list')
+        let datalist = $('#' + datalist_id)
+        datalist.html('')
+        $.ajax({url:'gon4d',
+            method:'get',
+            dataType:'json',
+            data: {link_type: match[1], link_id: match[2], code: code},
+            success:function(data){
+                if (!(typeof data === 'object' && 'error' in data)){
+                    for (let i = 0; i < data.length; i++){
+                        let op = document.createElement('option')
+                        op.value = data[i].code
+                        op.innerText = (typeof data[i].value === 'string') ? data[i].value : data[i].value.datetime_create
+                        datalist.append(op)
+                    }
+                }
+                // Заполним подсказку
+                let s_def = $('#' + 's_link_' + id)
+                s_def.text('')
+                let arr_dl = datalist.children().toArray()
+                let obj_is_correct = false
+                for (let i = 0; i < arr_dl.length; i++){
+                    if (code === arr_dl[i].value){
+                        let url = (match[1] === 'table') ? 'manage-object' : 'contract'
+                        let link_text = '<a target="_blank" href="/' + url + '?class_id=' + match[2] +
+                            '&object_code=' + code + '">' + arr_dl[i].innerText + '</a>'
+                        s_def.html(link_text)
+                        obj_is_correct = true
+                        break
+                    }
+                }
+                if (!code)
+                    obj_is_correct = true
+                $('#b_save_params_dict').attr('disabled', !obj_is_correct)
+            },
+            error: () => {$('#i_link_def').val('Ошибка')}
+        })
+    }
+    clearTimeout(typingTimer)
+    typingTimer = setTimeout(do_this, 1000)
 }

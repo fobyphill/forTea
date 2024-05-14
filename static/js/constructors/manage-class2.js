@@ -284,6 +284,7 @@ function new_field(is_contract, is_tree=false) {
     let chb_vis = document.createElement('input')
     chb_vis.type = 'checkbox'
     chb_vis.id = 'visiblenew'
+    chb_vis.setAttribute('onclick', 'set_totals_settings(this, ' + is_contract + ')')
     td_visible.appendChild(chb_vis)
     new_tr.append(td_required, td_visible)
     if (is_tree){
@@ -603,6 +604,7 @@ function fill_class_params(is_array, is_contract=false, is_tree=false){
             let chb_vis = document.createElement('input')
             chb_vis.id = 'visible' + field.id
             chb_vis.type = 'checkbox'
+            chb_vis.setAttribute('onclick', 'set_totals_settings(this, ' + is_contract + ')')
             // if (field.name === 'Наименование')
             //     chb_vis.setAttribute('onclick', 'return false')
             if (field.is_visible)
@@ -616,7 +618,7 @@ function fill_class_params(is_array, is_contract=false, is_tree=false){
         }
         // delay для контрактов
         if (is_contract){
-            if (field.formula !== 'array'){
+            if (field.formula !== 'array' && !is_tree){
                 let td_delay = document.createElement('td')
                 td_delay.className = 'col-0-5 text-center'
                 tr.appendChild(td_delay)
@@ -640,7 +642,7 @@ function fill_class_params(is_array, is_contract=false, is_tree=false){
         }
         // для справочников - delay
         else{
-            if (field.formula !== 'array'){
+            if (field.formula !== 'array' && !is_tree){
                 let td_delay = document.createElement('td')
                 td_delay.className = 'col-0-5 text-center'
                 tr.appendChild(td_delay)
@@ -981,6 +983,104 @@ function set_delay_settings(this_chb, is_contract=false){
     else{
         $('#tr_delay_settings_' + id).remove()
     }
+}
+
+function set_totals_settings(this_chb, is_contract=false){
+    let id = this_chb.id.slice(7)
+    if (this_chb.checked){
+        let field = (id === 'new') ? null: JSON.parse($('#fields').text()).find(el => el.id === id * 1)
+        let data_type = (field) ? field.formula : $('#s_type').val()
+        if (data_type !== 'float')
+            return false
+        let tr = document.createElement('tr')
+        tr.className = 'row'
+        tr.id = 'tr_totals_settings_' + id
+        let my_tr = this_chb.parentNode.parentNode
+        my_tr.after(tr)
+        let td_header = document.createElement('td')
+        td_header.className = 'col-4'
+        td_header.innerHTML = '<h5 class="text-center">Настройки итогов</h5>'
+        tr.appendChild(td_header)
+
+        let td_val = document.createElement('td')
+        td_val.className = 'col text-center'
+        tr.appendChild(td_val)
+        let settings = {'totals': []}
+        if (field && field.settings && 'totals' in field.settings)
+            settings = field.settings
+        let dict_totals = {'sum': 'сумма', 'avg': 'среднее', 'min': 'минимум', 'max': 'максимум', 'count': 'количетсво'}
+        // Выведем существующие итоги
+        for (let i = 0; i < settings.totals.length; i++){
+            let span_tot = document.createElement('span')
+            span_tot.className = 'btn btn-outline-secondary'
+            span_tot.id = 'total_' + id + '_' + settings.totals[i]
+            span_tot.innerText = dict_totals[settings.totals[i]]
+            span_tot.setAttribute('onclick', 'art(this, false)')
+            td_val.appendChild(span_tot)
+        }
+        let button_add = document.createElement('button')
+        button_add.className = 'btn btn-outline-primary'
+        button_add.innerText = '+'
+        button_add.id = 'b_totals_' + id
+        button_add.setAttribute('data-toggle', "dropdown")
+        button_add.setAttribute('aria-haspopup', "true")
+        button_add.setAttribute('aria-expanded', "false")
+        // выпадающий список итогов
+        let ddd = document.createElement('div')
+        ddd.className = 'dropdown d-inline'
+        td_val.appendChild(ddd)
+        ddd.appendChild(button_add)
+        let div_ddm = document.createElement('div')
+        div_ddm.className = 'dropdown-menu'
+        div_ddm.setAttribute('aria-labelledby', 'dropdownMenuButton')
+        ddd.appendChild(div_ddm)
+        for (let dt in dict_totals){
+            if (settings.totals.includes(dt))
+                continue
+            let di = document.createElement('span')
+            di.className = 'dropdown-item'
+            di.id = 's_total_' + id + '_' + dt
+            di.innerText = dict_totals[dt]
+            di.setAttribute('onclick', 'art(this)')
+            div_ddm.appendChild(di)
+        }
+    }
+    else{
+        $('#tr_totals_settings_' + id).remove()
+    }
+}
+
+// art = add / remove total
+function art(this_span, is_add=true){
+
+    let str_prefix, class_name, other_prefix, str_func
+    if (is_add){
+        str_prefix = 's_total_'
+        other_prefix = 'total_'
+        class_name = 'btn btn-outline-secondary'
+        str_func = 'art(this, false)'
+    }
+    else{
+        str_prefix = 'total_'
+        other_prefix = 's_total_'
+        class_name = 'dropdown-item'
+        str_func = 'art(this)'
+    }
+    let re = new RegExp(str_prefix + '([\\dnew]+)_(\\w+)')
+    let data = this_span.id.match(re)
+    let req_id = data[1]
+    let total_name = data[2]
+    let dict_totals = {'sum': 'сумма', 'avg': 'среднее', 'min': 'минимум', 'max': 'максимум', 'count': 'количетсво'}
+    let new_total = document.createElement('span')
+    new_total.className = class_name
+    new_total.id = other_prefix + req_id + '_' + total_name
+    new_total.innerText = dict_totals[total_name]
+    new_total.setAttribute('onclick', str_func)
+    if (is_add)
+        this_span.parentNode.parentNode.parentNode.insertBefore(new_total, this_span.parentNode.parentNode)
+    else
+        $('#b_totals_' + req_id)[0].nextSibling.appendChild(new_total)
+    this_span.remove()
 }
 
 $(document).on('change', 'input[name^="r_handler_type_"]', function(){

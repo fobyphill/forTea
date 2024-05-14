@@ -496,11 +496,21 @@ function save_fields() {
         }
         // Видимость
         dict.visible = $('#visible' + id).prop('checked')
+        // для чисел добавим итоги
+        if (dict.type === 'float' && dict.visible){
+            let totals = []
+            let tags_totals = $('span[id^="total_' + id + '"')
+            tags_totals.each(function(i){
+                totals.push(tags_totals[i].id.match(/total_[\dnew]+_(\w+)/)[1])
+            })
+            dict.totals = totals
+        }
+
         // для ссылок локация
         if (dict.type === 'const'){
             let json_object = JSON.parse($('#i_aliases').val())
             for (let i = 0; i < json_object.length; i++){
-                if (json_object[i].id == parseInt(dict.value)){
+                if (json_object[i].id === parseInt(dict.value)){
                     dict.location = json_object[i].location
                     break
                 }
@@ -520,8 +530,7 @@ function save_fields() {
         }
         array.push(dict)
     })
-    let output = JSON.stringify(array)
-    send_form_with_param('b_save_fields', output)
+    send_form_with_param('b_save_fields', JSON.stringify(array))
 }
 
 function is_change_unit(){

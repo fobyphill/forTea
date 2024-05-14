@@ -1,3 +1,6 @@
+var timer4gla
+
+
 // выполнить проверку условия выполнения
 function do_cc(json_object){
     $.ajax({url:'do-cc',
@@ -13,46 +16,59 @@ function do_cc(json_object){
     })
 }
 
+
 // Получить наименование объекта аяксом. Вход: код объекта, айди класса тег для вывода
 // class_type = t, c, d
 function get_link_ajax(this_input, class_type='t') {
-    let link_code = this_input.value
-    let header_id = this_input.id.match(/i_link_(\d+)/)[1]
-    let is_delay = (this_input.id.match(/i_link_\d+_delay/)) ? '_delay' : ''
-    let result = $('#s_link_' + header_id + is_delay)[0]
-    if (link_code === ''){
-        let link = document.createElement('a')
-        link.setAttribute('target', 'blank')
-        let header = JSON.parse($('#header_info' + header_id).text())
-        let loc_class = header.value.match(/(table|contract)\.(\d+)/)
-        let url = (loc_class[1] === 'table') ? '/manage-object' : '/contract'
-        url += '?class_id=' + loc_class[2]
-        link.setAttribute('href', url)
-        link.innerText = 'Перейти к объектам родителя'
-        result.innerText = ''
-        result.appendChild(link)
-    }
-    else{
-        $.ajax({url:'query-link',
-            method:'get',
-            dataType:'json',
-            data: {link_code: link_code, header_id: header_id, class_type: class_type},
-            success:function(data){
-                if ('error' in data)
-                    result.innerText = data.error
-                else{
-                    let addr = (data.location[0] === 'c') ? 'contract' : 'manage-object'
-                    let inner_text = (data.location === 'contract') ? date_time_to_rus(data.object_name) : data.object_name
-                    result.innerHTML = '<a target="_blank" href="/' + addr + '?class_id=' + data.class_id + '&object_code='
-                    + data.object_code + '">' + inner_text + '</a>'
-                }
-            },
-            error: function () {
-                result.innerText = 'Объект не найден'
-            }
-        })
-    }
+    clearTimeout(timer4gla)
+    timer4gla = setTimeout(fast_get_link(this_input, class_type), 1000)
 }
+
+
+
+// glas = get_link_ajax_serch
+function glas(this_input, class_type='t') {
+    clearTimeout(timer4gla)
+    timer4gla = setTimeout(()=>{
+        let link_code = this_input.value
+        let header_id = (this_input.id.slice(0,2) === 'sf') ? this_input.id.slice(2) : this_input.id.match(/.+sf(\d+)/)[1]
+        let result = $('#link_sf' + header_id)[0]
+        if (link_code === ''){
+            let link = document.createElement('a')
+            link.setAttribute('target', 'blank')
+            let header = JSON.parse($('#header_info' + header_id).text())
+            let header_val_def = ('value' in header) ? header.value : header.default
+            let loc_class =  header_val_def.match(/(table|contract)\.(\d+)/)
+            let url = (loc_class[1] === 'table') ? '/manage-object' : '/contract'
+            url += '?class_id=' + loc_class[2]
+            link.setAttribute('href', url)
+            link.innerText = 'Перейти к объектам родителя'
+            result.innerText = ''
+            result.appendChild(link)
+        }
+        else{
+            $.ajax({url:'query-link',
+                method:'get',
+                dataType:'json',
+                data: {link_code: link_code, header_id: header_id, class_type: class_type},
+                success:function(data){
+                    if ('error' in data)
+                        result.innerText = data.error
+                    else{
+                        let addr = (data.location[0] === 'c') ? 'contract' : 'manage-object'
+                        let inner_text = (data.location === 'contract') ? date_time_to_rus(data.object_name) : data.object_name
+                        result.innerHTML = '<a target="_blank" href="/' + addr + '?class_id=' + data.class_id + '&object_code='
+                        + data.object_code + '">' + inner_text + '</a>'
+                    }
+                },
+                error: function () {
+                    result.innerText = 'Объект не найден'
+                }
+            })
+        }
+    }, 1000)
+}
+
 
 // Подсказка "ссылка"
 function promp_link(this_input, is_contract=false) {
@@ -62,6 +78,34 @@ function promp_link(this_input, is_contract=false) {
         let header_id = this_input.id.match(/i_link_(\d+)/)[1]
         // let text_delay = (this_input.id.slice(this_input.id.length - 5) === 'delay') ? '_delay' : ''
         let result = $('#' + this_input.getAttribute('list'))[0]
+        $.ajax({url:'promp-link',
+            method:'get',
+            dataType:'json',
+            data: {link: link, header_id: header_id, is_contract: is_contract},
+            success:function(data){
+                result.innerText = ''
+                data.forEach((d) =>{
+                    let op = document.createElement('option')
+                    op.value = d.code
+                    op.innerText = d.value
+                    result.appendChild(op)
+                })
+            },
+            error: function () {
+                result.innerText = ''
+            }
+        })
+    }, 800)
+}
+
+// Подсказка "ссылка" для поискового окна
+// pls = promp_link_search
+function pls(this_input, is_contract=false) {
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() =>{
+        let link = this_input.value
+        let header_id = (this_input.id.slice(0,2) === 'sf') ? this_input.id.slice(2) : this_input.id.match(/.+sf(\d+)/)[1]
+        let result = $('#dl_sf' + header_id)[0]
         $.ajax({url:'promp-link',
             method:'get',
             dataType:'json',
@@ -208,4 +252,43 @@ function recount_alias(this_select) {
         }
     })
 
+}
+
+function fast_get_link(this_input,class_type='t'){
+    let link_code = this_input.value
+    let header_id = this_input.id.match(/i_link_(\d+)/)[1]
+    let is_delay = (this_input.id.match(/i_link_\d+_delay/)) ? '_delay' : ''
+    let result = $('#s_link_' + header_id + is_delay)[0]
+    if (link_code === ''){
+        let link = document.createElement('a')
+        link.setAttribute('target', 'blank')
+        let header = JSON.parse($('#header_info' + header_id).text())
+        let loc_class = header.value.match(/(table|contract)\.(\d+)/)
+        let url = (loc_class[1] === 'table') ? '/manage-object' : '/contract'
+        url += '?class_id=' + loc_class[2]
+        link.setAttribute('href', url)
+        link.innerText = 'Перейти к объектам родителя'
+        result.innerText = ''
+        result.appendChild(link)
+    }
+    else{
+        $.ajax({url:'query-link',
+            method:'get',
+            dataType:'json',
+            data: {link_code: link_code, header_id: header_id, class_type: class_type},
+            success:function(data){
+                if ('error' in data)
+                    result.innerText = data.error
+                else{
+                    let addr = (data.location[0] === 'c') ? 'contract' : 'manage-object'
+                    let inner_text = (data.location === 'contract') ? date_time_to_rus(data.object_name) : data.object_name
+                    result.innerHTML = '<a target="_blank" href="/' + addr + '?class_id=' + data.class_id + '&object_code='
+                    + data.object_code + '">' + inner_text + '</a>'
+                }
+            },
+            error: function () {
+                result.innerText = 'Объект не найден'
+            }
+        })
+    }
 }

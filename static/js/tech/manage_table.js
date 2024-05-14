@@ -1,6 +1,6 @@
 function show_hide_select(this_select){
     let s_link = document.getElementById('s_link')
-    if (this_select.value == 'link')
+    if (this_select.value === 'link')
         s_link.style.display = 'inline'
     else s_link.style.display = 'none'
 }

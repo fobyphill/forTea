@@ -49,12 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 });
 
-// Enter в полях блока фильтров
-$('.search-filter').keypress(function(e) {
-    if(e.keyCode === 13)
-        $('#form')[0].submit()
-});
-
 
 function send_form_with_param(name_param, value_param = ''){
     // Удалим параметр закачки файла
@@ -66,5 +60,17 @@ function send_form_with_param(name_param, value_param = ''){
     new_param.value = value_param
     let form = document.getElementById('form')
     form.appendChild(new_param)
+    form.submit()
+}
+
+function send_form_with_params(params){
+    for (let park in params){
+        let new_param = document.createElement('input')
+        new_param.type = 'hidden'
+        new_param.name = park
+        new_param.value = params[park]
+        let form = document.getElementById('form')
+        form.appendChild(new_param)
+    }
     form.submit()
 }

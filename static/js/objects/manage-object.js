@@ -13,6 +13,7 @@ window.onload = function () {
             sao(tr[1], 't', true)
     }
     start_popovers()
+    fill_search_filter()  // Заполним фильтры поиска
 }
 
 function fill_draft(draft){
@@ -84,7 +85,7 @@ function new_obj() {
             current_node[0].selectedIndex = 0
         else current_node.val(dict.default)
         if (dict.formula === 'link')
-            get_link_ajax(current_node[0])
+            fast_get_link(current_node[0])
         // Заполним собственника для массивов
         let owner = $('input[name="input_owner"]')
         if (owner.length){

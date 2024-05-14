@@ -5,6 +5,7 @@ var json_object = {}
 var array_delay = []
 var timeline_delay = []
 var form_control_init = false
+var arrays = JSON.parse($('#s_arrays').html())
 
 // Страница управления всеми типами объектов - справочниками, контрактами, словарями, массивами
 function escapeHtml(unsafe) {
@@ -19,7 +20,13 @@ function unescapeHtml(safe) {
 function fill_object_form(is_contract=false, is_draft=false) {
     let headers = $("span[id*='header_info']")
     // Вкинем данные в поля формы редактирования класса
-    $('#i_code').val(json_object.code)
+    if (json_object.type === 'dict'){
+        let owner =$('#i_owner')
+        owner.val(json_object.code)
+        ajax_link_def($('#parent_id').val(), owner.val(), $('#parent_type').val(), $('#s_owner')[0])
+        $('#b_save_dict').attr('onclick', 'pack_search(); send_form_with_param("b_save")')
+    }
+    else $('#i_code').val(json_object.code)
     // обернем в ссылку код
     let location = (is_contract) ? 'contract' : 'table'
     let url = 'hist-reg?i_date_in=1970-01-01T00:00&i_filter_object=' + json_object.code + '&i_filter_class='
@@ -37,7 +44,6 @@ function fill_object_form(is_contract=false, is_draft=false) {
             owner.val(json_object.parent_code)
             ajax_link_def($('#parent_id').val(), owner.val(), $('#parent_type').val(), $('#s_owner')[0])
         }
-
         // Заполним ветку (если она есть)
         if (typeof json_object[k] === 'object' && json_object[k] && Object.keys(json_object[k]).includes('name')
             && json_object[k].name === 'parent_branch'){
@@ -136,6 +142,7 @@ function fill_object_form(is_contract=false, is_draft=false) {
     if (!select_dicts.children().length)
         $('#div_footer_dict').attr('class', 'tag-invis')
     else $('#div_footer_dict').attr('class', 'input-group mb-3')
+
     // Зачистим делэи
     $('input[id$="_delay_datetime"]').val('')
     $('input[id$="_delay"]').val('').attr('checked', false)
@@ -226,23 +233,29 @@ function fill_object_form(is_contract=false, is_draft=false) {
         // добавим ссылки
         else if (header.formula === 'link'){
             let i_link = $('#i_link_' + header.id)
-            let link_code = (header.id in json_object) ? json_object[header.id].value : ''
-            i_link.val(link_code)
-            if (link_code){
-                let class_type = (json_object.type === 'dict') ? 'd': location[0]
-                get_link_ajax(i_link[0], class_type)
+            if (i_link.length){
+                let link_code = (header.id in json_object) ? json_object[header.id].value : ''
+                i_link.val(link_code)
+                if (link_code){
+                    let class_type = (json_object.type === 'dict') ? 'd': location[0]
+                    fast_get_link(i_link[0], class_type)
+                }
+                else {
+                    i_link.val('')
+                    $('#s_link_' + header.id).html('')
+                    promp_link(i_link[0], is_contract)
+                }
+                if (is_delay){
+                    let link_delay = $('#i_link_' + header.id + '_delay')
+                    link_delay.val(delay)
+                    promp_link(link_delay[0], is_contract)
+                    let class_type = (json_object.type === 'dict') ? 'd': location[0]
+                    fast_get_link(link_delay[0], class_type)
+                }
             }
-            else {
-                i_link.val('')
-                $('#s_link_' + header.id).html('')
-                promp_link(i_link[0], is_contract)
-            }
-            if (is_delay){
-                let link_delay = $('#i_link_' + header.id + '_delay')
-                link_delay.val(delay)
-                promp_link(link_delay[0], is_contract)
-                let class_type = (json_object.type === 'dict') ? 'd': location[0]
-                get_link_ajax(link_delay[0], class_type)
+            // для родителя дерева
+            else if(header.name === 'parent'){
+                $('#i_parent').val(json_object[header.id].value)
             }
         }
         // добавим датавремя
@@ -415,9 +428,16 @@ function fill_object_form(is_contract=false, is_draft=false) {
             $('#div_formula_' + header.id).html(val).attr('style', 'height: auto')
         }
         else{
-            $('#ta_' + header.id).val((header.id in json_object) ? json_object[header.id].value : null)
-            if (is_delay)
-                $('#ta_' + header.id + '_delay').val(delay)
+            let string_tag = $('#ta_' + header.id)
+            if (string_tag.length){
+                string_tag.val((header.id in json_object) ? json_object[header.id].value : null)
+                if (is_delay)
+                    $('#ta_' + header.id + '_delay').val(delay)
+            }
+            else{
+                // для заголовков веток деревьев
+                $('#i_name').val((header.id in json_object) ? json_object[header.id].value : null)
+            }
         }
     }
     let dict_type_prefix = {'float': '#i_float_', 'string': '#ta_', 'link': '#i_link_', 'bool': '#chb_',
@@ -537,8 +557,6 @@ function open_modal_with_params(param, val) {
     $('#universal_modal').modal('show');
 }
 
-
-
 // Подсказка "собственник" для словарей
 function promp_owner(this_input) {
     clearTimeout(typingTimer);
@@ -569,7 +587,7 @@ function promp_owner(this_input) {
 // Двигаем ползунок  location = t, c, d
 function moove_time() {
     let path = get_path_from_url()
-    let location = (path[0] === 'm') ? 't' : path[0]
+    let location = (path === 'tree') ? $('#div_location').text() : (path[0] === 'm') ? 't' : path[0]
     let code, class_id
     if (Object.keys(json_object).length){
         class_id = json_object.parent_structure
@@ -578,6 +596,8 @@ function moove_time() {
     else{
         class_id = get_param_from_url('class_id')
         code = $('tr.table-active')[0].id
+        if (code[0] === 'u')
+            code = code.slice(4)
     }
     let tag_page_num = $('#s_tl_page_num')
     let page_num = (tag_page_num.length) ? parseInt(tag_page_num.text()) : 1
@@ -728,7 +748,8 @@ function select_branch(this_li) {
     let page = $('input[name="page"]')
     if (page.length)
         page[0].value = '1'
-    send_form_with_param('branch_code', code)
+    let params = {'branch_code': code, 'date_from': $('#i_timeline_from').val(), 'date_to': $('#i_timeline_to').val()}
+    send_form_with_params(params)
 }
 
 function edit_branch(e){
@@ -833,7 +854,7 @@ function change_timeline_interval(date_to_now=false){
     let active_row = $('.row.table-active')
     active_row.removeClass('table-active')
     let url = get_path_from_url()
-    let location = (url[0] === 'm') ? 't' : url[0]
+    let location = (url === 'tree') ? $('#div_location').html() : (url[0] === 'm') ? 't' : url[0]
     let object_row = active_row[0]
     for (let i = 0; i < active_row.length; i++){
         if (active_row[i].id[0] !== 'u'){
@@ -844,6 +865,7 @@ function change_timeline_interval(date_to_now=false){
     sao(object_row, location)
 }
 
+
 // location = t, c, d; sao = select active object
 function sao(this_object, location='t', first_click=false) {
     if (this_object.parentElement.tagName === 'THEAD' || this_object.classList.contains('table-active'))
@@ -852,7 +874,7 @@ function sao(this_object, location='t', first_click=false) {
         $('#div_msg').text('').removeClass('text-red')
     $('#data-table tr.table-active').each((i, el)=>{el.className = 'row'})
     $(this_object).addClass('table-active');
-    let code = this_object.id
+    let code = (this_object.id[0] === 'u') ? this_object.id.slice(4) : this_object.id
     let class_id = get_param_from_url('class_id')
     $('#div_tl_hist').removeClass('div-disabled')
     // Известим пользователя о том, что информация загружается
@@ -1160,8 +1182,14 @@ function oe4no() {
 
 
 function ref_page() {
-change_timeline_interval(true);
-    var someIframe = window.parent.document.getElementById("myModal");
-    console.log(someIframe);
-    someIframe.parentNode.removeChild(someIframe);
+    change_timeline_interval(true);
 }
+
+// Enter в полях блока фильтров
+$('input[id^="sf"]').keypress(function(e) {
+    if(e.keyCode === 13){
+        pack_search()
+        $('#form')[0].submit()
+    }
+});
+

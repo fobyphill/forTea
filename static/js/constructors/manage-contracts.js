@@ -51,9 +51,8 @@ function select_unit(this_unit, location) {
         $('#div_tree_params').attr('class', 'tag-invis')
         $('#div_system_contract_params').attr('class', 'tag-invis')
         let is_array = (unit_data.formula === 'array')
-        if (is_array){
+        if (is_array)
             $('#div_tech_processes').removeClass('tag-invis')
-        }
         $('#tree_body_params').html('')
         fill_class_params(is_array, true)
         // Для контракта покажем и заполним системные параметры
@@ -576,6 +575,15 @@ function save_fields() {
             }
             // Видимость
             dict.visible = $('#visible' + id).prop('checked')
+            // для чисел добавим итоги
+            if (dict.type === 'float' && dict.visible){
+                let totals = []
+                let tags_totals = $('span[id^="total_' + id + '"')
+                tags_totals.each(function(i){
+                    totals.push(tags_totals[i].id.match(/total_[\dnew]+_(\w+)/)[1])
+                })
+                dict.totals = totals
+            }
             // для ссылок локация
             if (dict.type === 'const'){
                 let json_object = JSON.parse($('#i_aliases').val())
@@ -757,33 +765,46 @@ function decodeHtml(html) {
 
 // Заполнить значениями системные параметры контракта
 function fill_system_contract_params() {
-    let params = JSON.parse($('#system_fields').text    ())
+    let params = JSON.parse($('#system_fields').text())
     params.forEach((param)=>{
-        let ta = document.createElement('textarea')
+        let tag_name = (param.name === 'link_map') ? 'div' : 'textarea'
+        let container_tag = document.createElement(tag_name)
         let parent_td = null
         if (param.name === 'business_rule'){
-            ta.id = 'ta_br'
+            container_tag.id = 'ta_br'
             parent_td = $('#td_br')
             $('#td_br_id').text(param.id)
         }
         else if (param.name === 'link_map'){
-            ta.id = 'ta_lm'
+            container_tag.id = 'div_lm'
             parent_td = $('#td_lm')
             $('#td_lm_id').text(param.id)
+
         }
         else if (param.name === 'trigger'){
-            ta.id = 'ta_tr'
+            container_tag.id = 'ta_tr'
             parent_td = $('#td_tr')
             $('#td_tr_id').text(param.id)
         }
         else if (param.name === 'completion_condition'){
-            ta.id = 'ta_cc'
+            container_tag.id = 'ta_cc'
             parent_td = $('#td_cc')
             $('#td_cc_id').text(param.id)
         }
-        ta.value = param.value
-        if (parent_td)
-            parent_td.append(ta)
+        if (param.name === 'link_map'){
+            if (parent_td)
+                parent_td.append(container_tag)
+            let link_map = param.value
+
+    // рисуем дизайн
+            container_tag.innerHTML = '<button class="btn btn-outline-info" onclick="acilm(\'new\')" id="b_acilm">+</button>'
+            acilm(link_map)
+        }
+        else{
+            container_tag.value = param.value
+            if (parent_td)
+                parent_td.append(container_tag)
+        }
     })
 }
 
@@ -791,8 +812,7 @@ function save_system_fields() {
     let sys_fields = {}
     let ta_br = $('#ta_br').val()
     sys_fields.br = (ta_br) ? ta_br : null
-    let ta_lm = $('#ta_lm').val()
-    sys_fields.lm = (ta_lm) ? ta_lm : null
+    sys_fields.lm = palimafos()
     let ta_tr = $('#ta_tr').val()
     sys_fields.tr = (ta_tr) ? ta_tr : null
     let ta_cc = $('#ta_cc').val()

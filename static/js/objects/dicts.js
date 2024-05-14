@@ -176,7 +176,7 @@ function dict_link_promp(this_input, delay_promp=true){
                     for (let i = 0; i < data.length; i++){
                         let op = document.createElement('option')
                         op.value = data[i].code
-                        op.innerText = data[i].value
+                        op.innerText = (match_link[1] === 'contract') ? data[i].value.datetime_create : data[i].value
                         datalist.append(op)
                     }
                 }
