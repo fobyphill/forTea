@@ -15,6 +15,7 @@ class Designer(models.Model):
     value = models.JSONField(null=True)
     delay = models.BooleanField(null=True)
     system = models.BooleanField(default=False)
+    settings = models.JSONField(null=True)
 
 
 class Objects(models.Model):
@@ -38,6 +39,7 @@ class Contracts(models.Model):
     value = models.JSONField(null=True)
     delay = models.JSONField(null=True)
     system = models.BooleanField(default=False)
+    settings = models.JSONField(null=True)
 
 
 class ContractCells(models.Model):
@@ -112,8 +114,7 @@ class DictObjects(models.Model):
     value = models.CharField(max_length=500, null=True)
     name = models.ForeignKey(Dictionary, on_delete=models.RESTRICT, related_name='key_name')
     parent_structure = models.ForeignKey(Dictionary, on_delete=models.RESTRICT, related_name='dict')
-    code = models.PositiveIntegerField()
-    parent_code = models.PositiveIntegerField(null=True)
+    code = models.PositiveIntegerField(null=True)
 
 
 # Таблица "Коды таблиц". Location = table / contract / dict
