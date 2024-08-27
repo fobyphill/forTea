@@ -3,7 +3,8 @@ var biz_rule_timer
 $('.obj-prop').on('input', ()=>{
     if ($('#chb_br').length){
         clearTimeout(biz_rule_timer)
-        biz_rule_timer = setTimeout(get_business_rule, 1000)
+        let is_draft = ['contract-draft', 'table-draft'].includes(get_path_from_url())
+        biz_rule_timer = setTimeout(get_business_rule, 1000, is_draft)
     }
 })
 

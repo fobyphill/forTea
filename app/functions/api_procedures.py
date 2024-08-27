@@ -114,7 +114,7 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
             except ValueError:
                 return 'Ошибка. Некорректное значение ссылки. ID параметра: ' + str(k) + '. Значение: ' + v + '\n'
         elif header_param['formula'] == 'bool':
-            if v.lower() not in ('true', 'talse'):
+            if v.lower() not in ('true', 'false'):
                 return 'Ошибка. Некорректное значение логического параметра ' + str(k) + ' = ' + v + \
                        '.Укажите значение True или False' + '\n'
         elif header_param['formula'] == 'date':
@@ -226,13 +226,6 @@ def pdor(code, headers, params):
                 key = str(h['id'])
                 val = h['default']
         dict_object[dict_keys[h['formula']] + key] = val
-    # for k, v in params.items():
-    #     try:
-    #         int_k = int(k)
-    #     except ValueError:
-    #         return 'Ошибка. Некорректно указан ID параметра. ID - ' + k
-    #     h = next(h for h in headers if h['id'] == int_k)
-    #     dict_object[dict_keys[h['formula']] + k] = v
     return dict_object
 
 

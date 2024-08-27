@@ -4,10 +4,8 @@ import os
 import re
 from datetime import datetime
 
-from django.contrib.auth import get_user_model
-from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
-from django.db.models import Q, OuterRef, Subquery, F, FloatField, CharField, DateTimeField, ExpressionWrapper, Func, \
-    Value
+from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import Q, OuterRef, Subquery, F, FloatField, CharField, ExpressionWrapper, Func
 from django.db.models.functions import Cast
 from django.forms import model_to_dict
 from django.http import HttpResponse
@@ -18,11 +16,9 @@ from forteatoo.settings import DATABASES as dbses
 import app.functions.files_funs
 import app.functions.reg_funs
 from app.functions import database_funs, files_funs, database_procedures, reg_funs, interface_procedures, convert_funs, \
-    view_procedures, session_funs, tree_funs, contract_funs, convert_procedures, task_funs
+    view_procedures, session_funs, tree_funs, contract_funs, convert_procedures, task_funs, session_procedures
 from app.functions.files_funs import cffdth, upload_file
-from app.functions.interface_procedures import mofr
-from app.models import Dictionary, DictObjects, Objects, ContractCells, Contracts, Designer, RegistratorLog, \
-    TableDrafts, ContractDrafts, Tasks, TechProcess, TechProcessObjects, ClassTypesList
+from app.models import Dictionary, DictObjects, Objects, ContractCells, Contracts, Designer, TableDrafts, ContractDrafts, Tasks, TechProcess, TechProcessObjects, ClassTypesList
 
 
 # Управление словарем на странице конструктора
@@ -184,7 +180,7 @@ def save_dict_params(request, message):
                 reg_funs.simple_reg(request.user.id, 9, timestamp, transact_id, **reg)
                 # пропишем значения по умолчанию во все существующие объекты
                 codes = DictObjects.objects.filter(parent_structure_id=int(request.POST['i_id']))\
-                    .values('code', 'parent_code').distinct()
+                    .values('code').distinct()
                 new_records = []
                 for c in codes:
                     if new_field.formula == 'enum':
@@ -194,7 +190,7 @@ def save_dict_params(request, message):
                         val = int(val) if val else None
                     else:
                         val = p['default']
-                    new_records.append(DictObjects(code=c['code'], parent_code=c['parent_code'], value=val,
+                    new_records.append(DictObjects(code=c['code'], value=val,
                                                    name_id=new_field.id,
                                                    parent_structure_id=new_field.parent_id))
                 DictObjects.objects.bulk_create(new_records)
@@ -447,60 +443,85 @@ def delete_file(request, class_params, is_contract=False):
 
 
 # Создать черновик
-def make_graft(request, code, is_contract=False):
-    message = ''
-    class_id = int(request.GET['class_id'])
-
+def make_graft(request, class_id, headers, code, user_id, is_contract, update_menu=True, **params):
     draft = {'parent_structure': class_id, 'code': code, 'branch': None}
     # Если черновик контракта, то создадим пустое поле "Дата и время записи"
     if is_contract:
-        datetime_record_head = Contracts.objects.get(parent_id=class_id, name='system_data')
-        if code:
-            datetime_record = ContractCells.objects.filter(parent_structure_id=class_id, code=code, name_id=datetime_record_head.id).get()
-            val = datetime_record.value
+        try:
+            datetime_record_head_id = next(h['id'] for h in headers if h['name'] == 'system_data')
+        except StopIteration:
+            pass
         else:
-            val = None
-        draft[datetime_record.name_id] = {'value': val}
+            if code:
+                datetime_record = ContractCells.objects.filter(parent_structure_id=class_id, code=code,
+                                                               name_id=datetime_record_head_id).get()
+                val = datetime_record.value
+            else:
+                val = {'datetime_create': None}
+            draft[datetime_record_head_id] = {'value': val}
+
     if 'i_branch' in request.POST and request.POST['i_branch']:
         draft['branch'] = int(request.POST['i_branch'])
+
     for k, v in request.POST.items():
         try:
-            field_id = int(re.search(r'^(ta|i|i_datetime|i_link|i_float|s_enum|chb|i_date|i_filename|s_alias)_(?P<id>\d+)$',
-                                     k).group('id'))
+            field_id = re.search(r'^(ta|i|i_datetime|i_link|i_float|s_enum|chb|i_date|i_filename|s_alias|i_stage)_(?P<id>\d+)$',
+                                     k).group('id')
         except AttributeError:
-            field_id = re.match(r'dict_info(\d+)', k)
-            if field_id:
-                field_id = 'dict_' + field_id[1]
+            dict_field_id = re.match(r'dict_info(\d+)', k)
+            if dict_field_id:
+                field_id = 'dict_' + dict_field_id[1]
             else:
                 continue
+        # добавим данные словаря
         if re.match(r'dict_info', k):
             draft[field_id] = interface_procedures.convert_draft_dict(k, v)
+        # добавим данные стадии техпроцесса
+        elif re.match(r'i_stage', k):
+            tps_info = params['tps_info'] if 'tps_info' in params else []
+            interface_procedures.atid(draft, tps_info, field_id, v)
+        # добавим данные реквизита
         else:
             # Если есть имя файла, но нет файла в загрузчике, то скопируем файл из хранилища истории в черновики
             if re.match(r'i_filename_', k) and 'i_file_' + str(field_id) in request.POST and \
                     request.POST['i_filename_' + str(field_id)]:
                 location = 'contract' if is_contract else 'table'
-                files_funs.cffdth(v, request.GET['class_id'], reverse=True, location=location)
+                if request.POST['i_code']:
+                    v = files_funs.cffdth(v, class_id, rout='htd', location=location)
+                else:
+                    v = files_funs.cffdth(v, class_id, rout='dtd', location=location)
+
             draft[field_id] = {'value': interface_procedures.convert_draft_dict(k, v)}
+
     # Загрузим файлы в черновик
     for k, v in request.FILES.items():
         res, filename, msg = upload_file(request, k, v, request.POST['class_id'], is_contract, root_folder='database_files_draft')
         if res == 'o':
             draft[int(k[7:])] = {'value': filename}
-        else:
-            draft[int(k[7:])] = {'value': ''}
-            message = msg
     # Сохраним черновик
     manager = ContractDrafts if is_contract else TableDrafts
-    manager(data=draft, timestamp=datetime.now(), user_id=request.user.id).save()
-    # Пересчитаем соответствующее дерево и меню
-    session_funs.update_draft_tree(request, is_contract)
-    return draft, message
+    new_draft = manager(data=draft, timestamp=datetime.now(), user_id=user_id)
+    new_draft.save()
+
+    # добавим черновики всех массивов
+    if not ('dont_arrays' in params and params['dont_arrays']):
+        for h in headers:
+            if h['formula'] == 'array':
+                # Если у массива есть техпроцессы, загрузим их
+                params = {}
+                tps_info = session_procedures.atic(h['id'])
+                if tps_info:
+                    params['tps_info'] = tps_info
+                # mardraft
+                interface_procedures.marefo(h['id'], code, new_draft.id, user_id, is_contract, **params)
+        # Пересчитаем соответствующее дерево и меню
+        if update_menu:
+            session_funs.update_draft_tree(request, is_contract)
+    return new_draft
 
 
 # Редактировать черновик
 def draft_edit(request, draft_id, is_contract=False):
-    message = ''
     draft_manager = ContractDrafts.objects if is_contract else TableDrafts.objects
     draft = draft_manager.get(id=draft_id)
     is_change = False
@@ -513,18 +534,13 @@ def draft_edit(request, draft_id, is_contract=False):
     for k, v in request.POST.items():
         is_dict = False
         try:
-            field_id = re.search(r'^(ta|i|i_datetime|i_link|i_float|s_enum|chb|i_date|i_filename|s_alias)_(?P<id>\d+)$',
+            field_id = re.search(r'^(ta|i|i_datetime|i_link|i_float|s_enum|chb|i_date|i_filename|s_alias|i_stage)_(?P<id>\d+)$',
                                  k).group('id')
         except AttributeError:
             field_id = re.match(r'dict_info(\d+)', k)
             if field_id:
                 field_id = 'dict_' + field_id[1]
                 is_dict = True
-            elif re.match(r'i_code', k):
-                if not v:
-                    draft.data['code'] = None
-                    is_change = True
-                continue
             else:
                 continue
         val = interface_procedures.convert_draft_dict(k, v)
@@ -533,36 +549,39 @@ def draft_edit(request, draft_id, is_contract=False):
             if draft.data[field_id]:
                 for kk in draft.data[field_id]:
                     old_val[int(kk)] = draft.data[field_id][kk]
-        else:
-            old_val = draft.data[field_id]['value']
-        if val != old_val:
-            if is_dict:
+            if old_val != val:
                 draft.data[field_id] = val
                 is_change = True
-            else:
-                # Если был изменен файл
-                if re.match(r'i_filename', k):
-                    # загрузим файл на сервер
-                    file_key = 'i_file_' + str(field_id)
-                    res, val, msg = upload_file(request, file_key, v, request.POST['class_id'], is_contract,
-                                                root_folder='database_files_draft')
-                    if res == 'o':
-                        # физически удалим старый файл
-                        if old_val:
-                            app.functions.files_funs.delete_draft_file(old_val, request.GET['class_id'], is_contract)
-                        draft.data[field_id]['value'] = val
-                        is_change = True
-                    else:
-                        message += msg
+
+        elif re.match(r'i_stage_', k):
+            is_change = interface_procedures.atid(draft.data, request.session['temp_object_manager']['tps'],
+                                                               field_id, v) or is_change
+        else:
+            old_val = draft.data[field_id]['value'] if field_id in draft.data else None
+            if val != old_val:
+                if is_dict:
+                    draft.data[field_id] = val
+                    is_change = True
                 else:
-                    draft.data[field_id]['value'] = val
+                    # Если был изменен файл
+                    if re.match(r'i_filename', k):
+                        # загрузим файл на сервер
+                        file_key = 'i_file_' + str(field_id)
+                        res, val, msg = upload_file(request, file_key, v, request.POST['class_id'], is_contract,
+                                                    root_folder='database_files_draft')
+                        if res == 'o':
+                            # физически удалим старый файл
+                            if old_val:
+                                app.functions.files_funs.delete_draft_file(old_val, request.GET['class_id'], is_contract)
+                    if field_id in draft.data:
+                        draft.data[field_id]['value'] = val
+                    else:
+                        draft.data[field_id] = {'value': val}
                     is_change = True
     if is_change:
         draft.timestamp = datetime.now()
         draft.save()
-        message += 'Черновик изменен'
-    else:   message += 'Вы не внесли изменений. Черновик не был сохранен'
-    return is_change, message
+    return is_change, draft
 
 
 # Валидация объекта. Вход - реквест. Выход - да/нет, сообщение
@@ -581,12 +600,8 @@ def object_validation(class_params, request, current_class, objects=None, **para
     # Корректность вводимых данных
     def ctf(cf, val):  # ctf - check the field
         msg = ''; is_valid = True
-        # 1. Обязательные поля
-        if cf['formula'] != 'file' and cf['is_required'] and not val:
-            is_valid = False
-            msg += ' Не заполнено обязательное поле \"' + cf['name'] + '\"<br>'
-        # 2. Проверяем только заполненные поля. Пустые игнорим
-        elif val:
+        # Проверяем только заполненные поля. Пустые игнорим
+        if val:
             # 3. Проверка числового поля
             if cf['formula'] == 'float':
                 try:
@@ -594,7 +609,7 @@ def object_validation(class_params, request, current_class, objects=None, **para
                 except ValueError:
                     is_valid = False
                     msg += ' Некорректно указано значение поля \"' + cf['name'] + '\"<br>'
-            # 4. Проверка ссылочного поля
+            # Проверка ссылочного поля
             elif cf['formula'] == 'link':
                 try:
                     val = int(val)
@@ -605,7 +620,7 @@ def object_validation(class_params, request, current_class, objects=None, **para
                     if not database_funs.check_object(int(val), cf['value']):
                         is_valid = False
                         msg += ' Некорректно указано значение поля \"' + cf['name'] + '\".'
-            # 5. Проверка формата ДатаВремя
+            # Проверка формата ДатаВремя
             elif cf['formula'] == 'datetime':
                 try:
                     datetime.strptime(val, '%Y-%m-%dT%H:%M')
@@ -620,15 +635,15 @@ def object_validation(class_params, request, current_class, objects=None, **para
             object[field_id]['value'] = val
         return is_valid, msg
 
-    is_double_save = True  # защита от повторного сохранения
+    is_double_save = False  # защита от повторного сохранения
 
     for k, v in request.POST.items():
         # защита от повторного сохранения
         if k == 'csrfmiddlewaretoken':
-            if not 'csrf_token' in request.session['temp_object_manager'] or v != request.session['temp_object_manager']['csrf_token']:
+            if not 'csrf_token' in request.session['temp_object_manager']:
                 request.session['temp_object_manager']['csrf_token'] = v
-                is_double_save = False
-                break
+            elif v == request.session['temp_object_manager']['csrf_token']:
+                is_double_save = True
             continue
         # валидация данных
         try:
@@ -638,16 +653,20 @@ def object_validation(class_params, request, current_class, objects=None, **para
             continue
         else:
             current_field = next(cc for cc in class_params if cc['id'] == field_id)
-            is_valid, msg = ctf(current_field, v)
-            if not is_valid:
+            field_valid, msg = ctf(current_field, v)
+            if not field_valid:
                 message += msg
+                is_valid = False
             # Проверим делэйное значение, если делэй задан
             if current_field['delay']:
                 key_delay_date = k + '_delay_datetime'
                 if key_delay_date in request.POST and request.POST[key_delay_date]:
-                    is_valid, msg = ctf(current_field, request.POST[k + '_delay'])
+                    delay_valid, msg = ctf(current_field, request.POST[k + '_delay'])
+                    if not delay_valid:
+                        is_valid = False
+                        message += msg
     if is_double_save:
-        return False, ''
+        return False, 'Объект уже был сохранен ранее<br>'
     dict_keys_request = dict_keys = {'string': 'ta_', 'link': 'i_link_', 'float': 'i_float_', 'datetime': 'i_datetime_',
                  'date': 'i_date_', 'bool': 'chb_', 'const': 's_alias_', 'enum': 's_enum_'}
     # Проверка обязательных параметров
@@ -675,14 +694,12 @@ def object_validation(class_params, request, current_class, objects=None, **para
                         is_valid = False
                         message += 'Не заполнено обязательное поле - "' + cp['name'] + '"<br>'
                     else:
-                        if not cp['formula'] == 'bool' and not obj.value:
+                        if not cp['formula'] == 'bool' and not my_val:
                             is_valid = False
                             message += 'Не заполнено обязательное поле - "' + cp['name'] + '"<br>'
                 else:
                     is_valid = False
                     message += 'Не заполнено обязательное поле - "' + cp['name'] + '"<br>'
-
-
     return is_valid, message
 
 
@@ -693,7 +710,8 @@ def save_object(request, class_id, code, current_class, class_params, **params):
     if not 'source' in params:  params['source'] = None
     is_saved = False
     transact_id = None
-    timestamp = datetime.now()
+    parent_transact = params['parent_transact'] if 'parent_transact' in params else None
+    timestamp = params['timestamp'] if 'timestamp' in params else datetime.now()
     message_class = ''
 
     # редактируем
@@ -701,7 +719,6 @@ def save_object(request, class_id, code, current_class, class_params, **params):
         objects = Objects.objects.filter(code=code, parent_structure_id=class_id).select_related('name')
         is_valid, message = object_validation(class_params, request, current_class, objects)
         if is_valid:
-
             json_edit_objects = []
             new_objects = []
             # были ли внесены изменения
@@ -744,17 +761,20 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                             is_change = True
                             # Если тип данных файл - попробуем загрузить его
                             if re.match(r'i_filename_\d+$', k):
+                                res = ''
                                 if v:
                                     res, v, msg = upload_file(request, 'i_file_' + str(field_id), v, request.POST['class_id'])
                                     if res == 'f':
                                         message += msg
                                         message_class = 'text-red'
                                         continue
-                                    # Если файл не был загружен, попробуем загрузить его из черновика
-                                    elif res == 'm' and not cffdth(v, request.GET['class_id']):
-                                        message += 'Произошла ошибка во время загрузки файла<br>'
-                                        message_class = 'text-red'
-                                        continue
+                                    elif res == 'm':
+                                        # Если файл не был загружен, попробуем загрузить его из черновика
+                                        v = files_funs.cffdth(v, class_id)
+                                        if v[:6].lower() == 'ошибка':
+                                            message += 'Произошла ошибка во время загрузки файла<br>'
+                                            message_class = 'text-red'
+                                            continue
                             old_value = o.value
                             o.value = v
                             json_edit_dict['old_value'] = old_value
@@ -805,7 +825,6 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                                 json_edit_objects.append(json_edit_dict)
                             else:
                                 new_objects.append(o)
-
             # Если изменения были, то внесем их
             incoming = {'class_id': class_id, 'code': code, 'location': 'table', 'type': current_class.formula}
             if json_edit_objects:
@@ -844,7 +863,7 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                             ocd = icd.copy()
                             ocd['delay'] = jeo['new_obj'].delay
                             reg = {'json_income': icd, 'json': ocd}
-                            reg_funs.simple_reg(request.user.id, 22, timestamp, transact_id, **reg)
+                            reg_funs.simple_reg(request.user.id, 22, timestamp, transact_id, parent_transact **reg)
                         # Создаем / регистрируем таск
                         current_param = next(cp for cp in class_params if cp['id'] == jeo['new_obj'].name_id)
                         interface_procedures.make_task_4_delay(current_param, jeo['new_obj'], 't', request.user,
@@ -875,17 +894,15 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                             ts = timestamp
                         del oc['value']
                         reg = {'json': oc}
-                        reg_funs.simple_reg(request.user.id, 22, ts, transact_id, **reg)
+                        reg_funs.simple_reg(request.user.id, 22, ts, transact_id, parent_transact, **reg)
                         # Создаем таск
                         current_param = next(cp for cp in class_params if cp['id'] == no.name_id)
                         interface_procedures.make_task_4_delay(current_param, new_req, 't', request.user, timestamp, delay_ppa, transact_id)
-
-
-        elif message:
+        if not is_valid:
             message_class = 'text-red'
-            message += '<br>Объект не сохранен'
+            message += 'Объект не сохранен'
             if params['source'] != 'draft' and current_class.formula == 'table':
-                draft = make_graft(request, code)[0]
+                make_graft(request, current_class.id, class_params, code, request.user.id, False)
     # Создаем новый
     else:
         is_valid, message = object_validation(class_params, request, current_class)
@@ -896,7 +913,7 @@ def save_object(request, class_id, code, current_class, class_params, **params):
             # регистрация создания объекта
             outcoming = {'class_id': class_id, 'location': 'table', 'type': current_class.formula, 'code': code}
             reg = {'json': outcoming}
-            reg_funs.simple_reg(request.user.id, 5, timestamp, transact_id, **reg)
+            reg_funs.simple_reg(request.user.id, 5, timestamp, transact_id, parent_transact, **reg)
             objects = []
             # Сохраним ветку при ее наличии
             if 'i_branch' in request.POST:
@@ -926,10 +943,12 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                                 message_class = 'text-red'
                                 continue
                             # Если файл не был загружен, попробуем загрузить его из черновика
-                            elif res == 'm' and not cffdth(v, request.GET['class_id']):
-                                message += 'Произошла ошибка во время загрузки файла<br>'
-                                message_class = 'text-red'
-                                continue
+                            elif res == 'm':
+                                v = cffdth(v, request.GET['class_id'])
+                                if v.lower()[:6] == 'ошибка':
+                                    message += 'Произошла ошибка во время загрузки файла<br>'
+                                    message_class = 'text-red'
+                                    continue
                     new_prop.value = v
                     if date_delay_value:
                         # Если реквизит типа "файл" - предварительно загрузим его
@@ -979,7 +998,7 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                 del outcom['delay']
                 outcom.update(outcoming)
                 reg = {'json': outcom}
-                reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, **reg)
+                reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, parent_transact, **reg)
                 if nop.delay:
                     del outcom['value']
                     date_update = datetime.strptime(delay[-1]['date_update'], '%Y-%m-%dT%H:%M')
@@ -1006,7 +1025,7 @@ def save_object(request, class_id, code, current_class, class_params, **params):
             message_class = 'text-red'
             message += 'Объект не сохранен'
             if params['source'] != 'draft':
-                draft = make_graft(request, None)[0]
+                make_graft(request, current_class.id, class_params, code, request.user.id, False)
 
     if code and is_valid:
         # Сохраним словарь
@@ -1081,8 +1100,9 @@ def save_contract_object(request, code, current_class, class_params, **params):
     # Обработаем опциональные параметры
     if not 'source' in params:  params['source'] = None
     is_saved = False
-    transact_id = None
-    timestamp = datetime.now()
+    transact_id =  None
+    parent_transact = params['parent_transact'] if 'parent_transact' in params else None
+    timestamp = params['timestamp'] if 'timestamp' in params else datetime.now()
     message = ''
     message_class = ''
     is_valid = True
@@ -1095,10 +1115,10 @@ def save_contract_object(request, code, current_class, class_params, **params):
     system_data_id = next(cp['id'] for cp in class_params if cp['name'] == 'system_data') if current_class.formula == 'contract' else None
 
     # редактируем
-    if request.POST['i_code']:
+    if code:
         if is_valid:
             objects = ContractCells.objects.filter(code=code, parent_structure_id=current_class.id).select_related('name')
-            is_valid, message = contract_validation(class_params, current_class, request, objects)
+            is_valid, message = contract_validation(class_params, current_class, request)
             tps_all, change_tps, tps_valid, msg = interface_procedures.check_changes_tps(tps, code, request.POST)
             if change_tps:
                 for tak, tav in tps_all.items():
@@ -1157,18 +1177,25 @@ def save_contract_object(request, code, current_class, class_params, **params):
                         # Для массива не будем сохранять изменение собственника
                         if current_param['name'] == 'Собственник' and current_class.formula == 'array':
                             continue
-
                         json_object = {}
-                        if o.value != v:
+                        handler = current_param['delay'] and current_param['delay']['delay'] and current_param['delay']['handler']
+                        if o.value != v and not handler:
                             is_change = True
                             # Если тип данных файл, сравним имена файлов, а затем попробуем загрузить его
-                            if re.match(r'^i_filename_.\d+$', k):
+                            if re.match(r'^i_filename_.\d+$', k) and v:
                                 res, v, msg = app.functions.files_funs\
-                                    .upload_file(request, 'i_file_' + str(field_id), request.POST['class_id'], v, True)
+                                    .upload_file(request, 'i_file_' + str(field_id), v, request.POST['class_id'], True)
                                 if res == 'f':
                                     message += msg
                                     message_class = 'text-red'
                                     continue
+                                elif res == 'm':
+                                    # Если нет файла в загрузчике, попробуем загрузить его из черновиков
+                                    v = files_funs.cffdth(v, current_class.id, location='contract', rout='dth')
+                                    if v.lower()[:] == 'ошибка':
+                                        message += v + '<br>'
+                                        message_class = 'text-red'
+                                        continue
                             old_value = o.value
                             o.value = v
                             # добавим в словарь редактирования не новое значение, а дельту
@@ -1176,7 +1203,6 @@ def save_contract_object(request, code, current_class, class_params, **params):
                                 if not old_value:    old_value = 0
                                 edit_dict[k] = v - old_value
                             json_object['old_value'] = old_value
-
                         valid_delay = True
                         if date_delay_value:
                            # если тип данных - файл - попробуем загрузить его
@@ -1247,7 +1273,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
             general_reg_data = {'class_id': current_class.id, 'code': code, 'location': 'contract',
                                 'type': current_class.formula}
             # Если изменения были, то внесем их
-            if edit_objects or new_objects or change_tps:
+            if is_valid and (edit_objects or new_objects or change_tps):
                 if edit_objects or new_objects:
                     transact_id = reg_funs.get_transact_id(current_class.id, code, 'c') if not transact_id else transact_id
                 else:
@@ -1279,7 +1305,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                         oc_val = oc.copy()
                         oc_val['value'] = eo['new_obj'].value
                         reg_val = {'json_income': ic_val, 'json': oc_val}
-                        reg_funs.simple_reg(request.user.id, 15, timestamp, transact_id, **reg_val)
+                        reg_funs.simple_reg(request.user.id, 15, timestamp, transact_id, parent_transact, **reg_val)
                     if 'old_delay' in eo:
                         last_delay = eo['new_obj'].delay[-1]
                         date_update = datetime.strptime(last_delay['date_update'], '%Y-%m-%dT%H:%M')
@@ -1290,7 +1316,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                             oc_del = oc.copy()
                             oc_del['delay'] = eo['new_obj'].delay
                             reg_del = {'json': oc_del, 'json_income': ic_del}
-                            reg_funs.simple_reg(request.user.id, 22, timestamp, transact_id, **reg_del)
+                            reg_funs.simple_reg(request.user.id, 22, timestamp, transact_id, parent_transact, **reg_del)
                         else:
                             last_delay['date_update'] = datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
                             interface_procedures.rhwpd('contract', current_class.formula, date_update, last_delay, eo['new_obj'],
@@ -1305,7 +1331,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                         if eo['new_obj'].name_id in control_fields:
                             prms['cf'] = True
                         interface_procedures.make_task_4_delay(current_param, eo['new_obj'], 'c', request.user, timestamp,
-                                                               delay_ppa, transact_id, **prms)  # Создаем / регистрируем таск
+                                                               delay_ppa, transact_id, parent_transact, **prms)  # Создаем / регистрируем таск
             if new_objects:
                 is_saved = True
                 ContractCells.objects.bulk_create(new_objects)
@@ -1318,7 +1344,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                     oc['name'] = no.name_id
                     oc['value'] = no.value
                     reg = {'json': oc}
-                    reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, **reg)
+                    reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, parent_transact, **reg)
                     if no.delay:
                         del oc['value']
                         oc['delay'] = no.delay
@@ -1336,15 +1362,13 @@ def save_contract_object(request, code, current_class, class_params, **params):
                         reg_funs.simple_reg(request.user.id, 22, ts, transact_id, **reg)
                         current_param = next(cp for cp in class_params if cp['id'] == no.name_id)
                         interface_procedures.make_task_4_delay(current_param, no, 'c', request.user, timestamp, delay_ppa,
-                                                               transact_id)  # Создаем / регистрируем таск
+                                                               transact_id, parent_transact)  # Создаем / регистрируем таск
             # Сохраним техпроцессы
             if change_tps:
                 is_saved = True
                 interface_procedures.save_tps(tps, tps_all, code, request.user, timestamp, transact_id)
         else:
             message_class = 'text-red'
-            # if params['source'] != 'draft' and current_class.formula == 'contract':
-            #     message += make_graft(request, code, True)[1]
     # Создаем новый
     else:
         if is_valid:
@@ -1356,7 +1380,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
             # регистрация создания объекта
             outcoming = {'class_id': current_class.id, 'location': 'contract', 'type': current_class.formula, 'code': code}
             reg = {'json': outcoming}
-            reg_funs.simple_reg(request.user.id, 5, timestamp, transact_id, **reg)
+            reg_funs.simple_reg(request.user.id, 5, timestamp, transact_id, parent_transact, **reg)
             objects = []
             # Сохраняем
             if current_class.formula == 'contract':
@@ -1396,6 +1420,8 @@ def save_contract_object(request, code, current_class, class_params, **params):
                             message += msg
                             message_class = 'text-red'
                             continue
+                        elif res == 'm':
+                            v = files_funs.cffdth(v, current_class.id, location='contract', route='dth')
                         # Если файл не был загружен, попробуем загрузить его из черновика
                         elif res == 'm' and not cffdth(v, request.GET['class_id'], location='contract'):
                             message += 'Произошла ошибка во время загрузки файла<br>'
@@ -1480,7 +1506,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                                                                transact_id, **prms)
                     del outcom['delay']
                     reg = {'json': outcom}
-                    reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, **reg)
+                    reg_funs.simple_reg(request.user.id, 13, timestamp, transact_id, parent_transact, **reg)
                 # cохраним техпроцессы
                 for tp in tps:
                     try:
@@ -1507,8 +1533,9 @@ def save_contract_object(request, code, current_class, class_params, **params):
 
         else:
             message_class = 'text-red'
-            if current_class.formula == 'contract':
-                message += make_graft(request, None, True)[1]
+            if current_class.formula == 'contract' and params['source'] != 'draft':
+                make_graft(request, current_class.id, class_params, code, request.user.id, True)
+                message += 'Создан черновик объекта<br>'
     # Создание словаря
     if is_valid:
         dict_saved = save_dict(request, code, transact_id, timestamp)
@@ -1548,12 +1575,12 @@ def do_cc(current_contract, system_data_cell, completion_condition, user_id):
 
 
 # Валидация. Вход - реквест. Выход - да/нет, сообщение
-def contract_validation(class_params, current_class, request, objects=[]):
+def contract_validation(class_params, current_class, request):
     dict_keys = {'string': 'ta_', 'link': 'i_link_', 'float': 'i_float_', 'datetime': 'i_datetime_',
                  'date': 'i_date_', 'bool': 'chb_', 'const': 's_alias_', 'enum': 's_enum_'}
     message = ''
     is_valid = True
-    required_fields = [cp['id'] for cp in class_params if cp['is_required'] and cp['name'] != 'Дата и время записи']
+    # required_fields = [cp['id'] for cp in class_params if cp['is_required'] and cp['name'] != 'Дата и время записи']
     code = int(request.POST['i_code']) if request.POST['i_code'] else 0
     object = {'code': code, 'parent_srtucture': current_class.id}
     # проверка родительской ветки при ее наличии
@@ -1567,14 +1594,9 @@ def contract_validation(class_params, current_class, request, objects=[]):
             continue
         else:
             current_field = next(cp for cp in class_params if cp['id'] == int(field_id))
-            # 1. Обязательные поля
-            if field_id in required_fields and not v:
-                dv = interface_procedures.check_delay_value(request, field_id, k)
-                if not dv[0]:
-                    is_valid = False
-                    message += ' Не заполнено обязательное поле \"' + current_field['name'] + '\"<br>'
+
             # 2. Проверяем только заполненные поля. Пустые игнорим
-            elif v:
+            if v:
                 # 3. Проверка числового поля
                 if current_field['formula'] == 'float':
                     try:
@@ -1608,20 +1630,28 @@ def contract_validation(class_params, current_class, request, objects=[]):
                 object[field_id]['value'] = v
     # Проверим обязательные поля
     for cp in class_params:
+        if cp['name'] == 'system_data':
+            continue
         # Проверка обязательных файлов
-        if cp['formula'] == 'file' and cp['is_required']:
-            code = request.POST['i_code'] if 'i_code' in request.POST else None
-            rec = None
+        elif cp['formula'] == 'file' and cp['is_required']:
+            # проверим, был ли загружен файл ранее
+            str_cpid = str(cp['id'])
+            key1 = 'i_filename_' + str_cpid
+            key2 = 'i_file_' + str_cpid
+            if key1 in request.POST:
+                if request.POST[key1]:
+                    continue
+            elif key2 in request.FILES:
+                if request.FILES[key2]:
+                    continue
+
+            # Проверим, загружен ли файл сейчас
             if code:
-                rec = ContractCells.objects.filter(code=code, parent_structure_id=current_class.id, name_id=cp['id'])
-            if not code or not rec or not rec[0].value:
-                for k in request.FILES.keys():
-                    if int(k[7:]) == cp['id']:
-                        break
-                else:
-                    is_valid = False
-                    message += 'Не заполнено обязательное поле - "' + cp['name'] + '"<br>'
-                    # Проверка корректности формул
+                if not ContractCells.objects.filter(code=code, parent_structure_id=current_class.id, name_id=cp['id']):
+                    continue
+            is_valid = False
+            message += 'Не заполнено обязательное поле - "' + cp['name'] + '"<br>'
+        # Проверка корректности формул
         elif cp['formula'] == 'eval' and cp['is_required']:
             convert_funs.deep_formula(cp, [object, ], request.user.id, True)
             result = object[cp['id']]['value']
@@ -1629,68 +1659,13 @@ def contract_validation(class_params, current_class, request, objects=[]):
                 is_valid = False
                 message += 'Формула в поле "' + cp['name'] + '" ID: ' + str(cp['id']) + \
                          ' задана некорректно<br>'
-        elif cp in required_fields:
+        elif cp['is_required']:
             my_key = dict_keys[cp['formula']] + str(cp['id'])
             if not my_key in request.POST or not request.POST[my_key]:
-                if code:
-                    try:
-                        obj = next(o for o in objects if o.name_id == cp['id'])
-                    except StopIteration:
-                        is_valid = False
-                        message += ' Не заполнено обязательное поле \"' + cp['name'] + '\"<br>'
-                    else:
-                        if cp['formula'] != 'bool' and not obj.value:
-                            is_valid = False
-                            message += ' Не заполнено обязательное поле \"' + cp['name'] + '\"<br>'
-                else:
-                    is_valid = False
-                    message += ' Не заполнено обязательное поле \"' + cp['name'] + '\"<br>'
+                is_valid = False
+                message += ' Не заполнено обязательное поле \"' + cp['name'] + '\"<br>'
 
     return is_valid, message
-
-
-def get_new_tps(item_code, tps):
-    list_tps = []
-    def complete_stages(stages, exist_ids, output_list):
-        for s in stages:
-            if s['id'] not in exist_ids:
-                val = {'fact': 0, 'delay': []}
-                new_s = {'id': s['id'], 'parent_code': item_code, 'parent_structure_id': s['parent_id'], 'name': s['name'],
-                         'value': val}
-                output_list.append(new_s)
-        return sorted(output_list, key=lambda x: x['id'])
-
-    for t in tps:
-        exist_stages = TechProcessObjects.objects.filter(parent_structure_id=t['id'], parent_code=item_code)\
-                            .select_related('name')
-        exist_stages_ids = []
-        list_es = []
-        for es in exist_stages:
-            des = model_to_dict(es)
-            des['id'] = es.name_id
-            des['name'] = es.name.name
-            list_es.append(des)
-            exist_stages_ids.append(es.name.id)
-        if list_es:
-            # Если есть записи техпроцессов - дозаполним пустые записи
-            complete_stages(t['stages'], exist_stages_ids, list_es)
-        else:
-            # Если записей ТП нет - заполним заново
-            stage_0 = t['stages'][0]
-            try:
-                control_field_val = ContractCells.objects.get(parent_structure_id=t['parent_id'], code=item_code,
-                                                                 name_id=t['cf'])
-            except ObjectDoesNotExist:
-                cf_val = 0
-            else:
-                cf_val = control_field_val.value
-            first_stage = {'id': stage_0['id'], 'parent_code': item_code, 'parent_structure_id': stage_0['parent_id'],
-                           'name': stage_0['name'], 'value': {'fact': cf_val, 'delay': []}}
-            list_es.append(first_stage)
-            complete_stages(t['stages'], [stage_0['id']], list_es)
-        dict_tp = {'id': t['id'], 'stages': list_es, 'control_field': t['cf']}
-        list_tps.append(dict_tp)
-    return list_tps
 
 
 # ccv - create_class_validation
@@ -2150,3 +2125,16 @@ def sandf(request, query, headers, tree=None, branch=None):
             query = query.filter(code__in=list_qc)
     query = query.values('code').distinct().order_by('-code')
     return query, search_filter
+
+# mardraft = make array draft
+def mardraft(class_id, owner_code, user_id, is_contract):
+    class_manager = Contracts.objects if is_contract else Designer.objects
+    headers = list(class_manager.filter(parent_id=class_id, system=False).values())
+    obj_manager = ContractCells.objects if is_contract else Objects.objects
+    obj_codes = obj_manager.filter(parent_structure_id=class_id, name__name='Собственник', value=owner_code)\
+        .values('code').distinct()
+    objs = obj_manager.filter(parent_structure_id=class_id, code__in=Subquery(obj_codes))
+    objs = convert_funs.queyset_to_object(objs)
+    for o in objs:
+        my_request = interface_procedures.marefrod(class_id, is_contract, **o)
+        make_graft(my_request, class_id, headers, o['code'], user_id, is_contract, False)

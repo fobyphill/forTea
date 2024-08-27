@@ -131,6 +131,7 @@ class TableDrafts(models.Model):
     user = models.ForeignKey(auth.models.User, on_delete=models.DO_NOTHING)
     timestamp = models.DateTimeField(null=True)
     sender = models.ForeignKey(auth.models.User, on_delete=models.RESTRICT, null=True, related_name='sender')
+    active = models.BooleanField(default=True)
 
 
 # Черновики контрактов
@@ -139,6 +140,7 @@ class ContractDrafts(models.Model):
     user = models.ForeignKey(auth.models.User, on_delete=models.DO_NOTHING)
     timestamp = models.DateTimeField(null=True)
     sender = models.ForeignKey(auth.models.User, on_delete=models.RESTRICT, null=True, related_name='send_from')
+    active = models.BooleanField(default=True)
 
 
 # задания

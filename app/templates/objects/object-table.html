@@ -104,6 +104,7 @@
                     {% for vh in visible_headers %}
                         <td class="col text-center">{{ totv|get_item:vh.id|get_item:'full'|default_if_none:'' }}<br>
                         {{ totv|get_item:vh.id|get_item:'page'|default_if_none:'' }}</td>
+
                     {% endfor %}
                 </tr>
             {% endfor %}

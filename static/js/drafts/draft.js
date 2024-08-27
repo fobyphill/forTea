@@ -1,6 +1,10 @@
 var tps_valid_result = true;
+var timer_link
+var tps
+
+
 window.onload = function () {
-    if ($('tr').length){
+    if ($('tr.row').length > 1){
         if ($('tr.table-active').length)
             dsao($('tr.table-active')[0])
         else{
@@ -9,6 +13,7 @@ window.onload = function () {
     }
 }
 
+
 // выделение объекта dsao = draft select active object
 function dsao(this_object) {
     if (this_object.parentElement.tagName !== 'THEAD') {
@@ -16,11 +21,15 @@ function dsao(this_object) {
         this_object.className = 'row table-active'
         json_object = JSON.parse($('#json_object' + this_object.id).html())
         $('#s_timestamp').html(json_object['timestamp'])
-        fill_object_form(false, true)
-        if (get_path_from_url() === 'contract-draft')
+        let is_contract = (get_path_from_url() === 'contract-draft')
+        if (is_contract)
+            fill_tps(json_object)
+        fill_object_form(is_contract, true)
+        if (is_contract)
             get_business_rule(true)
     }
 }
+
 
 // Вернуть сведения из истории - не используется
 function retreive_draft_versions(json_object, is_contract=false) {
@@ -68,9 +77,11 @@ function retreive_draft_versions(json_object, is_contract=false) {
     })
 }
 
+
 // новый объект
 function new_obj() {
     // чистим
+    $('#i_dtc')
     $('.table-active').removeClass('table-active')
     $('#i_code').val('')
     $('#i_id').val('')
@@ -78,10 +89,9 @@ function new_obj() {
     $("input[id*='i_']").val('')
     $("input[id*='chb_']").attr('checked', false)
     $("span[id*='s_']").html('')
-    $("div[id*='div_table_slave_']").html('')
+    $("tbody[id*='tbody_array_']").html('')
     $('label[id*="l_file_"]').html('')
     $('div[id*="div_formula_"]').html('')
-    $('#i_hist_range').val('').attr('max', '0')
     $('#steplist').html('')
     // Скрываем
     $("button[id*='b_save_']").attr('class', 'tag-invis')
@@ -132,6 +142,9 @@ function new_obj() {
             let id = $("a:contains('Собственник')")[0].id.slice(8)
             $('#i_link_' + id).val(owner[0].value)
         }
+        // Поработаем с закрытыми хэндлером полями
+        let is_contract = get_path_from_url() === 'contract-draft'
+        oorbh(dict, false, is_contract)
     })
     $('#div_wrapper_dicts').html('')  // Удалим словари
     $('[id*=dict_info]').val('')  // Удалим информацию о текущих словарях
@@ -149,28 +162,24 @@ function new_obj() {
     })
 }
 
+
 // Новый черновик - отвязать от объекта
-function draft_new() {
+function draft_new(is_contract=false) {
     // чистим
     $('.table-active').removeClass('table-active')
     $('#i_code').val('')
     $('#i_id').val('')
-    // Если мы на черновике контракта, то дополнительно очистим поле "Дата и время записи"
-    let url = window.location.href
-    if (url.match(/contract-draft/)){
-        let datetimerec_id = null
-        let headers = $('span[id^="header_info"]')
-        for (let i = 0; i < headers.length; i++){
-            let json_obj = JSON.parse(headers[i].innerText)
-            if (json_obj.name === 'Дата и время записи'){
-                datetimerec_id = json_obj.id
-                break
-            }
-        }
-        $('#i_datetime_' + datetimerec_id).val('')
+    $('#i_dtc').val('')
+    let headers = $('span[id^="header_info"]')
+    // включим доступность данных, запрещенных из-за включенного делея и хэндлера
+    for (let i = 0; i < headers.length; i++){
+        let json_obj = JSON.parse(headers[i].innerText)
+        if (is_contract && json_obj.delay.delay && json_obj.delay.handler || !is_contract && json_obj.delay
+            && json_obj.delay_settings.handler)
+            oorbh(json_obj, false, is_contract)
     }
-
 }
+
 
 // Показать расположение файла черновика
 function show_file_loc_draft(header_id) {
@@ -215,6 +224,7 @@ function recepient_promp(){
     }, 1000)
 }
 
+
 function recepient_on_span(){
     let user_id = $('#i_recepient').val()
     let array_users = $('#dl_recepients').children()
@@ -224,4 +234,95 @@ function recepient_on_span(){
             break
         }
     }
+}
+
+
+// pdl = promp draft link
+function pdl(this_input, class_id, is_contract) {
+    clearTimeout(timer_link)
+    timer_link = setTimeout(()=>{
+        let id = this_input.id.slice(7)
+        let result = $('#s_link_' + id)
+        $.ajax({url:'draft-link',
+                method:'get',
+                dataType:'json',
+                data: {class_id: class_id, is_contract: is_contract, value: this_input.value},
+                success:function(data){
+                    if ('error' in data)
+                        result.text(data.error)
+                    else{
+                        result.text('')
+                        let dl = $('#dl_' + id)
+                        dl.html('')
+                        for (let i = 0; i < data.length; i++){
+                            let op = document.createElement('option')
+                            op.value = data[i].id
+                            op.innerText = data[i].data
+                            dl.append(op)
+                        }
+                        if (data.length === 1 && Boolean(parseInt(this_input.value))){
+                            let url = (is_contract) ? 'contract-draft' : 'table-draft'
+                            url += '?class_id=' + JSON.parse($('#i_current_class').val()).parent
+                            let link_text = '<a target="_blank" href="' + url + '&draft_id=' + data[0].id + '">от '
+                                + data[0].timestamp + '</a>'
+                            result.html(link_text)
+                        }
+                    }
+                },
+                error: function () {
+                    result.text('Ошибка')
+                }
+            })
+    }, 1000)
+}
+
+
+function pack_search(){
+
+}
+
+
+function fill_tps(object){
+    if (!tps)
+        tps = JSON.parse($('#tps').html())
+        json_object['new_tps'] = []
+    for (let k in object){
+        if (typeof object[k] === 'object'){
+            for (let kk in object[k]){
+                if (kk.match(/tp_/)){
+                    let tp_id = parseInt(kk.slice(5))
+                    let tp = tps.find(el => el.id === tp_id)
+                    let dict_tp = {'id': tp_id, 'control_field': tp.cf, 'stages': []}
+                    for (let i =0; i < tp.stages.length; i++){
+                        let stage = {'id': tp.stages[i].id}
+                        stage.value = {'fact': object[k][kk][tp.stages[i].id], 'delay': []}
+                        dict_tp.stages.push(stage)
+                    }
+                    json_object.new_tps.push(dict_tp)
+                }
+            }
+        }
+    }
+}
+
+
+function change_cf(this_input){
+    clearTimeout(timer_link)
+    timer_link = setTimeout(() =>{
+        let cf_id = parseInt(this_input.id.slice(8))
+        let new_val = (this_input.value) ? parseFloat(this_input.value) : 0
+        let my_tps = tps.filter(el => el.cf === cf_id)
+        let old_val = 0
+        for (let i = 0; i < my_tps[0].stages.length; i++){
+            let stage = $('#i_stage_' + my_tps[0].stages[i].id)
+            if (stage.val())
+                old_val += parseFloat(stage.val())
+        }
+        let delta = new_val - old_val
+        for (let i = 0; i < my_tps.length; i++){
+            let new_first_stage = $('#i_stage_' + my_tps[i].stages[0].id)
+            let old_val_first_stage = (new_first_stage.val()) ? parseFloat(new_first_stage.val()) : 0
+            new_first_stage.val(old_val_first_stage + delta)
+        }
+    }, 500)
 }

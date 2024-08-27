@@ -1,8 +1,6 @@
 from copy import deepcopy
 from datetime import datetime
-
 from django.forms import model_to_dict
-
 from app.functions import reg_funs, task_procedures, database_funs, update_funs, files_funs, api_funs
 from app.models import Tasks, ContractCells, TechProcessObjects, Objects, RegistratorLog
 
@@ -162,7 +160,6 @@ def change_task_stage(user_id, task_rec, timestamp=datetime.today(), **params):
             do_task2(task_rec.code, user_id, timestamp, transact_id)
 
 
-
 # params = {timestamp, parent_transact}
 def make_task4prop(user_id, data, handler, date_delay, **params):
     timestamp = params['timestamp'] if'timestamp' in params else datetime.today()
@@ -266,8 +263,6 @@ def delete_stage_task(task_code, user_id, **params):
     reg_funs.paket_reg(list_regs)
 
 
-
-
 # Полное удаление таска с откатом прежних значений на объектах
 def task_full_delete(task_code, timestamp, user_id):
     task_del = Tasks.objects.filter(code=task_code)
@@ -343,3 +338,21 @@ def reg_create_task(user_id, timestamp, parent_transact):
     reg = {'json': {'code': task_code}}
     reg_funs.simple_reg(user_id, 17, timestamp, task_transact_id, parent_transact, **reg)
     return task_code, task_transact_id
+
+
+# ctdo = create_task_delay_object
+def ctdo(date_delay, delay_object, user_id):
+    timestamp = datetime.today()
+    if date_delay < timestamp:
+        timestamp, date_delay = date_delay, timestamp
+    code, transact_id = reg_create_task(user_id, timestamp, None)
+    task = Tasks(data=delay_object, user_id=user_id, date_create=timestamp, code=code, date_delay=date_delay, kind='do')
+    task.save()
+    # Регистрация создания записи задачи
+    dict_task = model_to_dict(task)
+    str_date_create = datetime.strftime(timestamp, '%Y-%m-%dT%H:%M:%S')
+    str_date_delay = datetime.strftime(date_delay, '%Y-%m-%dT%H:%M:%S')
+    dict_task['date_create'] = str_date_create
+    dict_task['date_delay'] = str_date_delay
+    reg = {'json': dict_task}
+    reg_funs.simple_reg(user_id, 18, timestamp, transact_id, **reg)

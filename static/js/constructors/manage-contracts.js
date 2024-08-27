@@ -595,7 +595,7 @@ function save_fields() {
                 }
             }
             // Делэй
-            let delay = {'delay': $('#delay' + id).prop('checked'), 'handler': null}
+            let delay = {'delay': $('#delay' + id).prop('checked')}
             let handler_user = $('#i_handler_' + id)
             let handler_eval = $('#ta_handler_' + id)
             if (handler_user.length){

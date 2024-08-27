@@ -4,8 +4,11 @@ import copy
 from datetime import datetime, date
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import Subquery
+from django.forms import model_to_dict
 
-from app.functions import tree_funs, view_procedures, task_funs, reg_funs, update_funs, convert_funs
+from app.functions import tree_funs, view_procedures, task_funs, reg_funs, update_funs, convert_funs, session_funs, \
+    interface_funs
 from app.models import Dictionary, Contracts, Designer, ContractCells, Objects, TechProcessObjects, RegistratorLog
 
 
@@ -20,17 +23,22 @@ def convert_draft_dict(k, v):
     elif re.match(r'dict_info', k):
         json_dict = json.loads(v) if v else None
         if json_dict:
-            output_dict = {}
-            dict_headers = Dictionary.objects.filter(parent_id=json_dict['id'])
-            for kk, vv in json_dict.items():
-                try:
-                    kk = int(kk)
-                except ValueError:
-                    continue
-                dh = next(dh for dh in dict_headers if dh.id == kk)
-                output_dict[kk] = {'value': vv}
-                output_dict[kk]['name'] = dh.name
-                output_dict[kk]['type'] = dh.formula
+            dict_id = json_dict['id']
+            del json_dict['id']
+            if json_dict:
+                output_dict = {}
+                dict_headers = Dictionary.objects.filter(parent_id=dict_id)
+                for kk, vv in json_dict.items():
+                    try:
+                        kk = int(kk)
+                    except ValueError:
+                        continue
+                    dh = next(dh for dh in dict_headers if dh.id == kk)
+                    output_dict[kk] = {'value': vv}
+                    output_dict[kk]['name'] = dh.name
+                    output_dict[kk]['type'] = dh.formula
+            else:
+                output_dict = None
             json_dict = output_dict
         val = json_dict
     else:
@@ -492,6 +500,7 @@ def check_changes_tps(tps, code, params):
                     tps_valid = False
     return tps_all, tps_chng, tps_valid, message
 
+
 # Сохраним техпроцессы
 def save_tps(tps, tps_all, code, user_data, timestamp, parent_trans):
     for ta_k, ta_v in tps_all.items():
@@ -573,3 +582,149 @@ def pack_vis_headers(current_class, headers, is_contract=False):
     if not is_main_name:
         vhids.append(next(h['id'] for h in headers if h['name'] == main_name))
     return visible_headers, vhids
+
+
+# marefo =make request from object
+def marefo(class_id, owner_code, parent_object_id, user_id, is_contract, **params):
+    dict_key_types = {'float': 'i_float_', 'bool': 'chb_', 'string': 'ta_', 'link': 'i_link_', 'date': 'i_date_',
+                      'datetime': 'i_datetime_', 'file': 'i_filename_', 'const': 's_alias_', 'enum': 's_enum_'}
+    class_manager = Contracts.objects if is_contract else Designer.objects
+    headers = list(class_manager.filter(parent_id=class_id, system=False).values())
+    obj_manager = ContractCells.objects if is_contract else Objects.objects
+    obj_codes = obj_manager.filter(parent_structure_id=class_id, name__name='Собственник', value=owner_code).values('code').distinct()
+    objs = obj_manager.filter(parent_structure_id=class_id, code__in=Subquery(obj_codes))
+    objs = convert_funs.queyset_to_object(objs)
+
+    class MyRequest:
+        POST = {}
+        FILES = {}
+        session = {}
+    my_request = MyRequest()
+    for o in objs:
+        copy_request = copy.deepcopy(my_request)
+        for ok, ov in o.items():
+            if ok in ('parent_structure', 'code', 'type'):
+                continue
+            my_key = dict_key_types[ov['type']] + str(ok)
+            if ov['name'] == 'Собственник':
+                ov['value'] = parent_object_id
+            copy_request.POST[my_key] = str(ov['value'])
+        if 'tps_info' in params:
+            tps = get_new_tps(o['code'], params['tps_info'])
+            for tp in tps:
+                for s in tp['stages']:
+                    val = s['value']['fact'] + sum(d['value'] for d in s['value']['delay'])
+                    copy_request.POST['i_stage_' + str(s['id'])] = val
+        interface_funs.make_graft(copy_request, class_id, headers, o['code'], user_id, is_contract, False, **params)
+
+
+# marefrod = make request from dict
+def marefrod(class_id, is_contract, **params):
+    dict_key_types = {'float': 'i_float_', 'bool': 'chb_', 'string': 'ta_', 'link': 'i_link_', 'date': 'i_date_',
+                      'datetime': 'i_datetime_', 'file': 'i_filename_', 'const': 's_alias_', 'enum': 's_enum_'}
+    class_manager = Contracts.objects if is_contract else Designer.objects
+    headers = list(class_manager.filter(parent_id=class_id, system=False).values())
+
+    class my_user:
+        id = 0
+    class MyRequest:
+        POST = {}
+        FILES = {}
+        session = {}
+        user = my_user()
+
+    my_request = MyRequest()
+    my_request.POST['class_id'] = str(class_id)
+
+    for pk, pv in params.items():
+        if pk in ('parent_structure', 'type', 'location'):
+            continue
+        elif pk == 'code':
+            my_request.POST['i_code'] = str(pv)
+        elif re.match(r'array', pk):
+            continue
+        elif pk[:9] == 'dict_info':
+            my_request.POST[pk] = pv
+        else:
+            header = next(h for h in headers if h['id'] == int(pk))
+            my_key = dict_key_types[header['formula']] + str(pk)
+            my_request.POST[my_key] = str(pv)
+        if pk == 'tps_info':
+            tps = get_new_tps(int(my_request.POST['i_code']), pv)
+            for tp in tps:
+                for s in tp['stages']:
+                    val = s['value']['fact'] + sum(d['value'] for d in s['value']['delay'])
+                    my_request.POST['i_stage_' + str(s['id'])] = val
+    return my_request
+
+
+# atid = add tp in draft
+def atid(draft, tps, field_id, val):
+    is_change = False
+    int_field_id = int(field_id)
+    for tp in tps:
+        for s in tp['stages']:
+            if s['id'] == int_field_id:
+                tp_id = tp['id']
+                cf = str(tp['cf'])
+                break
+        else:
+            continue
+        break
+    else:
+        return False
+    str_tp_id = 'tp_id' + str(tp_id)
+    val = float(val) if val else 0
+    if str_tp_id in draft[cf]:
+        old_val = draft[cf][str_tp_id][field_id] if field_id in draft[cf][str_tp_id] else 0
+        if old_val != val:
+            draft[cf][str_tp_id][field_id] = val
+            is_change = True
+    else:
+        draft[cf][str_tp_id] = {field_id: val}
+        is_change = True
+    return is_change
+
+
+def get_new_tps(item_code, tps):
+    list_tps = []
+    def complete_stages(stages, exist_ids, output_list):
+        for s in stages:
+            if s['id'] not in exist_ids:
+                val = {'fact': 0, 'delay': []}
+                new_s = {'id': s['id'], 'parent_code': item_code, 'parent_structure_id': s['parent_id'], 'name': s['name'],
+                         'value': val}
+                output_list.append(new_s)
+        return sorted(output_list, key=lambda x: x['id'])
+
+    for t in tps:
+        exist_stages = TechProcessObjects.objects.filter(parent_structure_id=t['id'], parent_code=item_code)\
+                            .select_related('name')
+        exist_stages_ids = []
+        list_es = []
+        for es in exist_stages:
+            des = model_to_dict(es)
+            des['id'] = es.name_id
+            des['name'] = es.name.name
+            list_es.append(des)
+            exist_stages_ids.append(es.name.id)
+        if list_es:
+            # Если есть записи техпроцессов - дозаполним пустые записи
+            complete_stages(t['stages'], exist_stages_ids, list_es)
+        else:
+            # Если записей ТП нет - заполним заново
+            stage_0 = t['stages'][0]
+            try:
+                control_field_val = ContractCells.objects.get(parent_structure_id=t['parent_id'], code=item_code,
+                                                                 name_id=t['cf'])
+            except ObjectDoesNotExist:
+                cf_val = 0
+            else:
+                cf_val = control_field_val.value
+            first_stage = {'id': stage_0['id'], 'parent_code': item_code, 'parent_structure_id': stage_0['parent_id'],
+                           'name': stage_0['name'], 'value': {'fact': cf_val, 'delay': []}}
+            list_es.append(first_stage)
+            complete_stages(t['stages'], [stage_0['id']], list_es)
+        dict_tp = {'id': t['id'], 'stages': list_es, 'control_field': t['cf']}
+        list_tps.append(dict_tp)
+    return list_tps

@@ -16,7 +16,7 @@
              height="100%"></a>
         {# Справочники #}
         {% if request.user.is_staff %}
-            {% with '/manage-class-tree /manage-object' as list %}
+            {% with '/manage-class-tree /manage-object /table-draft' as list %}
                 <a href="{% if request.user.is_superuser %}/manage-class-tree{% else %}/manage-object{% endif %}" class="nav-link
                     {% if request.path in list.split %}
                         active text-bold
@@ -27,7 +27,7 @@
             {% endwith %}
         {% endif %}
         {# Контракты #}
-        {% with '/manage-contracts /contract' as list %}
+        {% with '/manage-contracts /contract /contract-draft' as list %}
             <a href="{% if request.user.is_superuser %}/manage-contracts{% else %}/contract{% endif %}" class="nav-link
                     {% if request.path in list.split %}
                         active text-bold

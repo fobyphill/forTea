@@ -15,17 +15,19 @@
                         <tr class="row">
                             <td class="col-4"></td>
                             <td class="col">
-                                <div class="row">
-                                    <div class="col text-center">
-                                        <label class="badge btn-secondary">State</label>
+                                {% if current_class %}
+                                    <div class="row">
+                                        <div class="col text-center">
+                                            <label class="badge btn-secondary">State</label>
+                                        </div>
+                                        <div class="col text-center">
+                                            <label class="badge btn-secondary">Fact</label>
+                                        </div>
+                                        <div class="col text-center">
+                                            <label class="badge btn-secondary">Delay</label>
+                                        </div>
                                     </div>
-                                    <div class="col text-center">
-                                        <label class="badge btn-secondary">Fact</label>
-                                    </div>
-                                    <div class="col text-center">
-                                        <label class="badge btn-secondary">Delay</label>
-                                    </div>
-                                </div>
+                                {% endif %}
                             </td>
                         </tr>
                         {% for s in tp.stages %}
@@ -36,9 +38,9 @@
                                         <input type="number" class="form-control text-right obj-prop"
                                                oninput="csot({{ s.id }}, {{ s.parent_id }})"
                                             id="i_stage_{{ s.id }}" name="i_stage_{{ s.id }}">
-                                        <span class="form-control text-right bg-light"
+                                        <span class="{% if current_class %}form-control text-right bg-light{% else %}tag-invis{% endif %}"
                                         id="s_stage_{{ s.id }}_fact"></span>
-                                        <span class="form-control text-right bg-light"
+                                        <span class="{% if current_class %}form-control text-right bg-light{% else %}tag-invis{% endif %}"
                                         id="s_stage_{{ s.id }}_delay"></span>
                                         <span class="tag-invis" id="s_stage_{{ s.id }}_start_delay"></span>
                                     </div>

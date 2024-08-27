@@ -1,5 +1,3 @@
-from django.db.models import Subquery, Q, F
-
 from app.functions import reg_funs
 from app.models import ContractCells, Objects
 
@@ -56,4 +54,6 @@ def avto(current_class, location, header, parent_transact, user_id, timestamp):
     for nr in new_reqs:
         pack_to_reg(nr, None, 13)
     reg_funs.paket_reg(list_regs)
+
+
 

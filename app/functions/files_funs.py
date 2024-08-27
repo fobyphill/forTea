@@ -29,31 +29,33 @@ def delete_draft_file(file_name, class_id, is_contract=False):
 # Копирует файл из папки черновики в историю и чистит его в черновиках
 # cffdth - copy file from draft to history
 # filename - строка. техническое имя файла вида - 05102022154532file.ext
-# class_id - строка
 # Опциональные параметры:
-# reverse - true. Копирует из истории в черновики. В этом случае не удаляет исторический файл
+# rout [htd, dtd, dth]. Копирует [HistToDraft, DraftToDraft, DraftToHist]. В случае DTH удаляет файл
 # location - table/contract. Default table
 def cffdth(filename, class_id, **params):
-    reverse = True if 'reverse' in params and params['reverse'] else False
+    str_class_id = str(class_id)
+    # reverse = 'reverse' in params and params['reverse']
+    rout = params['rout'] if 'rout' in params else 'dth'
     location = 'contract_' if 'location' in params and params['location'] == 'contract' else 'table_'
+    old_root_folder = 'database_files_draft' if rout[0] == 'd' else os.path.join('static', 'database_files_history')
+    new_root_folder = 'database_files_draft' if rout[2] == 'd' else os.path.join('static', 'database_files_history')
     folder_date = filename[4:8] + '-' + filename[2:4] + '-' + filename[:2]
-    draft_path = os.path.join('database_files_draft', location + class_id,
-                              folder_date, filename)
-    hist_path = os.path.join('static', 'database_files_history', location + class_id,
-                               folder_date, filename)
-    file_from = hist_path if reverse else draft_path
-    file_to = draft_path if reverse else hist_path
+    new_timestamp = datetime.strftime(datetime.today(), '%d%m%Y%H%M%S')
+    new_folder_date = new_timestamp[4:8] + '-' + new_timestamp[2:4] + '-' + new_timestamp[:2]
+    new_filename = new_timestamp + filename[14:]
+    file_from = os.path.join(old_root_folder, location + str_class_id, folder_date, filename)
+    file_to = os.path.join(new_root_folder, location + str_class_id, new_folder_date, new_filename)
     folder_to = os.path.dirname(file_to)
     if not os.path.exists(folder_to):
         os.makedirs(folder_to)
     try:
         shutil.copyfile(file_from, file_to)
     except FileNotFoundError:
-        return False
+        return 'Ошибка. Файл не найден'
     else:
-        if not reverse:
+        if rout == 'dth':
             os.remove(file_from)
-    return True
+    return new_filename
 
 
 # Загрузить файл на сервер

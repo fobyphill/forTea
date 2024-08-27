@@ -176,6 +176,24 @@ def cstdt(str_var, type):
     return val
 
 
+# cdtts = convert data type to string
+def cdtts(var, type):
+    if var:
+        if type == 'date':
+            val = var[8:] + '.' + var[6:8] + '.' + var[:4]
+        elif type == 'datetime':
+            val = var[8:10] + '.' + var[6:8] + '.' + var[:4] + ' ' + var[11:]
+        elif type == 'file':
+            val = var[14:]
+        elif type == 'string':
+            val = var
+        else:
+            val = str(var)
+    else:
+        val = ''
+    return val
+
+
 # Упорядочить объекты по заданному набору заголовков
 # sobah - sort objects by array headers
 # objs - объекты в формате json, где ключи объектов являются ID заголовков класса
@@ -277,10 +295,10 @@ def gtfol(objects, visible_headers, is_contract=False):
 
                 if tot == 'max':
                     full_tot = all_this_req.aggregate(tot=Max('val'))
-                    page_tot = max(page_list)
+                    page_tot = max(page_list) if page_list else 0
                 elif tot == 'min':
                     full_tot = all_this_req.aggregate(tot=Min('val'))
-                    page_tot = min(page_list)
+                    page_tot = min(page_list) if page_list else 0
                 elif tot == 'avg':
                     full_tot = all_this_req.aggregate(tot=Avg('val'))
                     page_tot = sum(page_list) / len(page_list) if page_list else 0
@@ -296,3 +314,15 @@ def gtfol(objects, visible_headers, is_contract=False):
                 totals[rus_tot][vh['id']]['full'] = f'Всего: {full_tot:,.2f}'.replace(',', ' ')
                 totals[rus_tot][vh['id']]['page'] = f'На стр.: {page_tot:,.2f}'.replace(',', ' ')
     return totals
+
+
+def dict_to_post(my_dict):
+    class MyRequest:
+        POST = {}
+        FILES = {}
+        session = {}
+        user = None
+    my_request = MyRequest()
+    for mk, mv in my_dict.items():
+        my_request.POST[mk] = mv
+    return my_request

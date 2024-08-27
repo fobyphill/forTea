@@ -124,7 +124,6 @@ def create_object(class_id, user_id, location='table', source=None, **params):
             params[str_parent_id] = params['parent']
 
     # Созидание объекта
-
     output['code'] = code
     json_object = output.copy()
     # Работа с источником
@@ -277,10 +276,8 @@ def create_object(class_id, user_id, location='table', source=None, **params):
             system_data_cell = next(o for o in object if o.name_id == system_data_cp['id'])
             cc = list(Contracts.objects.filter(parent_id=current_class.id, name='completion_condition', system=True).values())[0]
             interface_funs.do_cc(current_class, system_data_cell, cc, user_id)
-
     else:
         return 'Ошибка. Не задан ни один параметр объекта. Объект не сохранен'
-
     return object
 
 
@@ -732,14 +729,19 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
             for cp in class_params:
                 if cp['name'] in excl_nms:
                     continue
-                if cp['is_required'] and not cp['formula'] == 'eval' and (not str(cp['id']) in params):
-                    try:
-                        op = next(op for op in object_params if op.name_id == cp['id'])
-                    except StopIteration:
-                        str_errors_req_fields += 'Ошибка. Не задан обязательный параметр. ID: ' + str(cp['id']) + '<br>'
-                    else:
-                        if not type(op.value) in (float, int) and not op.value:
+                if cp['is_required'] and not cp['formula'] == 'eval':
+                    # Если значение обязательного параметра не было передано или было передано, но пустое
+                    str_cp_id = str(cp['id'])
+                    if not str_cp_id in params:
+                        try:
+                            op = next(op for op in object_params if op.name_id == cp['id'])
+                        except StopIteration:
                             str_errors_req_fields += 'Ошибка. Не задан обязательный параметр. ID: ' + str(cp['id']) + '<br>'
+                        else:
+                            if not type(op.value) in (float, int) and not op.value:
+                                str_errors_req_fields += 'Ошибка. Не задан обязательный параметр. ID: ' + str(cp['id']) + '<br>'
+                    elif not params[str_cp_id]:
+                        str_errors_req_fields += 'Ошибка. Не задан обязательный параметр. ID: ' + str(cp['id']) + '<br>'
             if str_errors_req_fields:
                 return str_errors_req_fields
         # Если были изменения, то работаем с системными параметрами

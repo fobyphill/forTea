@@ -121,7 +121,7 @@ def manage_object(request):
 
         # Кновка "В черновик"
         elif 'b_draft' in request.POST:
-            message += interface_funs.make_graft(request, code)[1]
+            interface_funs.make_graft(request, current_class.id, headers, code, request.user.id, False)
             message += 'Черновик был создан<br>'
 
         # Кнопка "Скачать файл"

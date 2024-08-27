@@ -28,7 +28,7 @@ def query_link(request):
                                  name_id=int(parent_class_name_id))
             val = object.value['datetime_create'] if parent_class_type == 'contract' else object.value
             result = {'class_id': parent_class_id, 'object_code': int(request.GET['link_code']),
-                      'object_name': val, 'location': class_type}
+                      'object_name': val, 'location': parent_class_type[0]}
             result_string = json.dumps(result)
         except (ObjectDoesNotExist, ValueError):
             return HttpResponse('Объект не найден')

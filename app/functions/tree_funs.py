@@ -163,6 +163,7 @@ def get_branch_props(branch, class_id, headers, user_id, is_contract=False, **pa
             b['props'] = {}
     return branch
 
+
 # antt - add node to tree
 # Добавляет ветку, которой нет в дереве. Возвращает ссылку на ветку
 def antt(code, tree, class_id, headers, user_id, is_contract=False):
@@ -186,7 +187,7 @@ def antt(code, tree, class_id, headers, user_id, is_contract=False):
     while list_codes:
         current_code = list_codes.pop()
         branch = find_branch(tree, 'code', current_code)
-        if 'children' in branch:
+        if branch and 'children' in branch:
             branch['opened'] = True
             if not branch['children']:
                 branch['children'] = get_children_branches(current_code, class_id, is_contract)

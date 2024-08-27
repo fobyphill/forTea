@@ -12,7 +12,8 @@ from django.http import HttpResponse
 
 import app.functions.contract_funs
 import app.functions.interface_procedures
-from app.functions import view_procedures, interface_funs, convert_funs, session_funs, contract_funs, hist_funs
+from app.functions import view_procedures, interface_funs, convert_funs, session_funs, contract_funs, hist_funs, \
+    convert_procedures
 from app.models import TableDrafts, Designer, ContractDrafts, Contracts, ContractCells, Objects, TechProcess, \
     RegistratorLog, TechProcessObjects, DictObjects, Dictionary, MainPageConst
 from django.contrib.auth import get_user_model
@@ -207,7 +208,7 @@ def gfob(request):
     if 'my_dicts' in tom and tom['my_dicts']:
         convert_funs.add_dicts(object, tom['my_dicts'])
     if 'tps' in tom:
-        object[0]['new_tps'] = interface_funs.get_new_tps(code, tom['tps'])
+        object[0]['new_tps'] = app.functions.interface_procedures.get_new_tps(code, tom['tps'])
     return HttpResponse(json.dumps(object[0], ensure_ascii=False), content_type="application/json")
 
 
@@ -271,6 +272,7 @@ def calc_user_formula(request):
     convert_funs.deep_formula(our_const, (our_const, ), request.user.id, is_contract)
     return HttpResponse(json.dumps(our_const[our_const['id']]['value'], ensure_ascii=False), content_type="application/json")
 
+
 # cmpf = calc main page formula
 @view_procedures.if_error_json
 def cmpf(request):
@@ -289,7 +291,6 @@ def cmpf(request):
     return HttpResponse(json.dumps(result, ensure_ascii=False), content_type="application/json")
 
 
-
 @view_procedures.is_auth
 def uch(request):
     header_id = int(request.GET['header_id'])
@@ -299,3 +300,50 @@ def uch(request):
     const_id = re.search(r'(?:contract|table)\.(\d+)', header.value)[1]
     const = list(child_manager.filter(parent_id=int(const_id)).values('id', 'name'))
     return HttpResponse(json.dumps(const, ensure_ascii=False), content_type="application/json")
+
+
+@view_procedures.is_auth
+def draft_link(request):
+    val = request.GET['value']
+    is_contract = request.GET['is_contract'] == 'true'
+    class_manager = Contracts.objects if is_contract else Designer.objects
+    current_class = class_manager.get(id=int(request.GET['class_id']))
+    headers = list(class_manager.filter(parent_id=current_class.parent_id, system=False).values('id', 'name', 'formula'))
+    object_manager = ContractDrafts.objects if is_contract else TableDrafts.objects
+    objs = object_manager.filter(data__parent_structure=current_class.parent_id, user_id=request.user.id)
+    try:
+        parent_id = int(request.GET['value'])
+    except ValueError:
+        parent_id = None
+    if parent_id:
+        objs = objs.filter(id=parent_id)
+    result = []
+    for o in objs:
+        dict_res = {'id': o.id, 'timestamp': datetime.strftime(o.timestamp, '%d.%m.%Y %H:%M:%S')}
+        object_filtred = False
+        data = ''
+        for dk, dv in o.data.items():
+            if dk == 'code':
+                data += 'Код: ' + str(dv)
+                continue
+            elif dk in ('parent_structure', 'branch') or 'dict' in dk:
+                continue
+            header = next(h for h in headers if h['id'] == int(dk))
+            str_dv = convert_procedures.cdtts(dv['value'], header['formula'])
+            if str_dv:
+                if header['formula'] == 'string' and type(str_dv) is str:
+                    str_dv = '\'' + str_dv + '\''
+                if header['name'] == 'system_data':
+                    if str_dv['datetime_create']:
+                        data += ' от ' + str_dv['datetime_create']
+                else:
+                    data += ' ' + header['name'] + ': ' + str_dv
+            if parent_id:
+                object_filtred = True
+            elif type(dv['value']) is str and val.lower() in dv['value'].lower():
+                object_filtred = True
+        dict_res['data'] = data
+        if object_filtred:
+            result.append(dict_res)
+    return HttpResponse(json.dumps(result, ensure_ascii=False), content_type="application/json")
+

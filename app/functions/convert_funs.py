@@ -480,23 +480,31 @@ def prepare_table_to_template(headers, objects, user_id, is_contract=False, **pa
         elif h['formula'] == 'array':
             owners = [o['code'] for o in objects]
             class_manager = Contracts.objects if is_contract else Designer.objects
-            headers_array = list(class_manager.filter(parent_id=h['id'], is_visible=True)\
-                                 .exclude(name='Собственник').order_by('priority').values()[:4])
+            headers_array = list(class_manager.filter(parent_id=h['id']).order_by('priority').values())
+            headers_ids = []
+            vis_headers_array = []
+            header_owner = None
             for ha in headers_array:
-                convert_procedures.ficoitch(ha)
-            headers_ids = [ha['id'] for ha in headers_array]
-            header_owner = class_manager.get(parent_id=h['id'], name='Собственник')
-            headers_ids.append(header_owner.id)
+                if ha['name'] == 'Собственник':
+                    header_owner = ha
+                    headers_ids.append(ha['id'])
+                    vis_headers_array.append(ha)
+                if ha['is_visible']:
+                    convert_procedures.ficoitch(ha)
+                    headers_ids.append(ha['id'])
+                    vis_headers_array.append(ha)
+                if len(vis_headers_array) >= 6:
+                    break
             object_manager = ContractCells.objects if is_contract else Objects.objects
-            array_codes = object_manager.filter(parent_structure_id=h['id'], name_id=header_owner.id,
+            array_codes = object_manager.filter(parent_structure_id=h['id'], name_id=header_owner['id'],
                                                 value__in=owners).values('code')
             array_children = object_manager.filter(parent_structure_id=h['id'], code__in=Subquery(array_codes),
                                                    name_id__in=headers_ids)
             array_children = queyset_to_object(array_children)
             for o in objects:
                 o[h['id']] = {}
-                o[h['id']]['objects'] = [ac for ac in array_children if o['code'] == int(ac[header_owner.id]['value'])]
-                o[h['id']]['headers'] = headers_array
+                o[h['id']]['objects'] = [ac for ac in array_children if o['code'] == int(ac[header_owner['id']]['value'])]
+                o[h['id']]['headers'] = vis_headers_array
                 prepare_table_to_template(headers_array, o[h['id']]['objects'], user_id, is_contract)
 
 

@@ -1,4 +1,4 @@
-var timer4gla
+var timer4gla = 0
 
 
 // выполнить проверку условия выполнения
@@ -21,7 +21,7 @@ function do_cc(json_object){
 // class_type = t, c, d
 function get_link_ajax(this_input, class_type='t') {
     clearTimeout(timer4gla)
-    timer4gla = setTimeout(fast_get_link(this_input, class_type), 1000)
+    timer4gla = setTimeout(fast_get_link, 1000, this_input, class_type)
 }
 
 
@@ -95,7 +95,7 @@ function promp_link(this_input, is_contract=false) {
                 result.innerText = ''
             }
         })
-    }, 800)
+    }, 1200)
 }
 
 // Подсказка "ссылка" для поискового окна

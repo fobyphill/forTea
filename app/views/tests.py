@@ -24,8 +24,8 @@ import pandas as pd
 
 @view_procedures.is_auth_app
 def tests(request):
-    ccs = Objects.objects.filter(name__name__icontains='Наименование')
-    return HttpResponse(str(len(ccs)))
+    update_funs.run_delays()
+    return HttpResponse('ok')
 
 
 def tests_template(request):

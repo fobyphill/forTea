@@ -18,6 +18,8 @@ function unescapeHtml(safe) {
 
 // процедура заполнения данных формы выделенного объекта
 function fill_object_form(is_contract=false, is_draft=false) {
+    if (is_draft)
+        $('#i_id').val(json_object.id)
     let headers = $("span[id*='header_info']")
     // Вкинем данные в поля формы редактирования класса
     if (json_object.type === 'dict'){
@@ -50,17 +52,18 @@ function fill_object_form(is_contract=false, is_draft=false) {
             branch_val = json_object[k].value
             break
         }
-        else if (k === 'branch'){
+        else if (k === 'branch')
             branch_val = json_object[k]
-            break
-        }
+
         // заполним массивы, если они есть
         else if (typeof json_object[k] === 'object' && json_object[k] && Object.keys(json_object[k]).includes('headers')){
-            fill_arrays(json_object[k].objects, k)
+            fill_arrays(json_object[k].objects, k, is_draft)
         }
         // заполним новые техпроцессы
         else if (k === 'new_tps'){
             // Обнулим ТПСы
+            $('input[id*="i_stage_"]').val('')
+            $('span[id*="s_stage_"]').text('')
             let tps = JSON.parse($('#tps').text())
             for (let i = 0; i < tps.length; i++){
                 let current_tp = json_object.new_tps[i]
@@ -68,10 +71,8 @@ function fill_object_form(is_contract=false, is_draft=false) {
                     json_object[current_tp.control_field].value : 0
                 let stage_0 = tps[i].stages[0]
                 let vals = $('#i_stage_' + stage_0.id + '')
-                vals.val('')
                 vals.val(cf_val)
                 let fact_dels = $('#s_stage_' + stage_0.id + '_fact')
-                fact_dels.text('')
                 fact_dels.text(cf_val)
             }
             // Если данные прибыли - работаем с ними
@@ -156,8 +157,10 @@ function fill_object_form(is_contract=false, is_draft=false) {
         if (is_contract){
             is_delay = (header.delay) ? header.delay.delay : false
         }
-        else if  (json_object.type === 'table' || json_object.type === 'table')
+        else if  (json_object.type === 'table' || json_object.type === 'array')
             is_delay = header.delay
+        if (is_draft)
+            is_delay = false
         let delay = ''
         let handler
         if (is_delay){
@@ -238,12 +241,18 @@ function fill_object_form(is_contract=false, is_draft=false) {
                 i_link.val(link_code)
                 if (link_code){
                     let class_type = (json_object.type === 'dict') ? 'd': location[0]
-                    fast_get_link(i_link[0], class_type)
+                    if (is_draft && header.name === 'Собственник' && json_object.type === 'array')
+                        pdl(i_link[0], json_object.parent_structure, is_contract)
+                    else
+                        fast_get_link(i_link[0], class_type)
                 }
                 else {
                     i_link.val('')
                     $('#s_link_' + header.id).html('')
-                    promp_link(i_link[0], is_contract)
+                    if (is_draft && header.name === 'Собственник' && json_object.type === 'array')
+                        pdl(i_link[0], json_object.parent_structure, is_contract)
+                    else
+                        promp_link(i_link[0], is_contract)
                 }
                 if (is_delay){
                     let link_delay = $('#i_link_' + header.id + '_delay')
@@ -357,7 +366,6 @@ function fill_object_form(is_contract=false, is_draft=false) {
                         b_del_file.attr('class', 'btn btn-outline-danger')
                     else b_del_file.attr('class', 'tag-invis')
                     filename.val(file_name)
-                    // filename.prop('name', 'i_filename_' + header.id)
                     let full_file_name = (is_draft) ? 'd' : 'h'
                     full_file_name += file_name
                     $('#s_filename_' + header.id).html(full_file_name)
@@ -371,7 +379,6 @@ function fill_object_form(is_contract=false, is_draft=false) {
                     $('#s_filename_' + header.id).html('')
                 }
                 filename.val(file_name)
-                // filename.prop('name', 'i_filename_' + header.id)
             }
             else {
                 label.html('Выберите файл')
@@ -411,12 +418,19 @@ function fill_object_form(is_contract=false, is_draft=false) {
         }
         // добавим ссылку на массив
         else if(header.formula === 'array') {
-            let link_array = $('#a_array_' + header.id)
-            let new_link_text = link_array.attr('href').replace(/input_owner=.*$/, 'input_owner=' + json_object.code)
-            link_array.attr('href', new_link_text)
-            let button_array = $('#iframe_' + header.id)
-            let new_src_text = button_array.attr('src').replace(/input_owner=.*$/, 'input_owner=' + json_object.code)
-            button_array.attr('src', new_src_text)
+            if (is_draft){
+                let my_iframe = $('#iframe_' + header.id)
+                let new_link_addr = my_iframe.attr('src').replace(/owner=\d*$/, 'owner=' + json_object.id)
+                my_iframe.attr('src', new_link_addr)
+            }
+            else{
+                let link_array = $('#a_array_' + header.id)
+                let new_link_text = link_array.attr('href').replace(/input_owner=.*$/, 'input_owner=' + json_object.code)
+                link_array.attr('href', new_link_text)
+                let button_array = $('#iframe_' + header.id)
+                let new_src_text = button_array.attr('src').replace(/input_owner=.*$/, 'input_owner=' + json_object.code)
+                button_array.attr('src', new_src_text)
+            }
         }
         // добавим формулы
         else if (header.formula === 'eval'){
@@ -440,45 +454,24 @@ function fill_object_form(is_contract=false, is_draft=false) {
             }
         }
     }
-    let dict_type_prefix = {'float': '#i_float_', 'string': '#ta_', 'link': '#i_link_', 'bool': '#chb_',
-        'date': '#i_date_', 'datetime': '#i_datetime_', 'enum': '#s_enum_', 'const': '#s_alias_', 'file': '#i_file_'}
-    if (!form_control_init){
+
+    if (!form_control_init || is_draft){
         form_control_init = true
+        let not_draft_new = (is_draft) ? Boolean(json_object.code) : true
         for (let i = 0; i < headers.length; i++){
             let header = JSON.parse(headers[i].innerText)
             let handler
             if (is_contract)
                 handler = (header.delay) ? header.delay.handler : null
-            else if (json_object.type === 'table' || json_object.type === 'table')
+            else if (json_object.type === 'table')
                 handler = header.delay_settings.handler
             let is_delay
             if (is_contract){
                 is_delay = (header.delay) ? header.delay.delay : false
             }
             else is_delay = header.delay
-            let my_style
-            if (header.formula === 'bool') {
-                let chb = $(dict_type_prefix[header.formula] + header.id)
-                if (is_delay && Boolean(handler))
-                    chb.attr('onclick', 'return false')
-                else chb.attr('onclick', '')
-            }
-            else if (header.formula === 'datetime'){
-                let rodt = (header.name === 'system_data' && is_contract) ? true : is_delay && Boolean(handler)
-                $(dict_type_prefix[header.formula] + header.id).attr('readonly', rodt)
-                }
-            else if (['enum', 'const'].includes(header.formula)){
-                my_style = (is_delay && Boolean(handler)) ? 'pointer-events: none; background-color: #e9ecef' : ''
-                $(dict_type_prefix[header.formula] + header.id).attr('style', my_style)
-                }
-            else if (header.formula === 'file'){
-                let my_file = $(dict_type_prefix[header.formula] + header.id)
-                if (is_delay && Boolean(handler) && Boolean(my_file.length))
-                    my_file.remove()
-                else if (!my_file.length)
-                    cfiff(header.id)
-                }
-            else $(dict_type_prefix[header.formula] + header.id).attr('readonly', is_delay && Boolean(handler))
+            let readonly = is_delay && Boolean(handler) && not_draft_new
+            oorbh(header, readonly, is_contract)
         }
     }
 }
@@ -543,12 +536,17 @@ function change_file_label(input){
 }
 
 // Вызов универсального модального окна
-function open_modal_with_params(param, val) {
+function open_modal_with_params(param, val=false) {
     let button_do_name = $('#button_do_name')
     switch (param){
         case 'b_del_file':
             $('#span_header').html('Удаление файла')
             $('#div_body_text').html('Вы пытаетесь удалить файл. Восстановление невозможно. Подтвердите намерение')
+            button_do_name.html('Удалить')
+            break
+        case  'b_del_draft':
+            $('#span_header').html('Удаление черновика')
+            $('#div_body_text').html('Вы пытаетесь удалить черновик. Действие необратимо. Подтвердите намерение')
             button_do_name.html('Удалить')
             break
     }
@@ -778,7 +776,7 @@ function select_draft(this_select, is_contract=false) {
 
 }
 
-function fill_arrays(objects, array_id){
+function fill_arrays(objects, array_id, is_draft=false){
     let table_array = $('#table_array_' + array_id)
     if (objects)
         table_array.removeClass('tag_invis')
@@ -814,7 +812,7 @@ function fill_arrays(objects, array_id){
                     if (obj.type === 'bool')
                         val = (obj.value) ? '&#10003;' : ''
                     else if (obj.type === 'const')
-                        val = obj.result
+                        val = ('result' in obj) ? obj.result : obj.value
                     else if (obj.type === 'link' && obj.data){
                         let url = (obj.data.type === 'contract') ? 'contract' : 'manage-object'
                         url += '?class_id=' + obj.data['parent_structure'] + '&object_code=' + obj.data.code
@@ -846,6 +844,11 @@ function fill_arrays(objects, array_id){
             tr.appendChild(td)
         }
     }
+    if (is_draft){
+        let obj_ids = []
+        objects.forEach(o => obj_ids.push(o.id))
+        $('#i_slave_' + array_id).val(JSON.stringify(obj_ids))
+    }
 }
 
 function change_timeline_interval(date_to_now=false){
@@ -869,6 +872,8 @@ function change_timeline_interval(date_to_now=false){
 // location = t, c, d; sao = select active object
 function sao(this_object, location='t', first_click=false) {
     if (this_object.parentElement.tagName === 'THEAD' || this_object.classList.contains('table-active'))
+        return false
+    if (this_object.parentElement.tagName === 'TFOOT' || this_object.classList.contains('table-active'))
         return false
     if (!first_click)
         $('#div_msg').text('').removeClass('text-red')
@@ -1114,6 +1119,7 @@ function get_full_object(class_id, code, location){
     })
 }
 
+
 // reflofi = recount float field
 function reflofi(this_input, start_recount_tps){
     clearTimeout(typingTimer)
@@ -1162,6 +1168,7 @@ function reflofi(this_input, start_recount_tps){
             rfsot(id, is_delay, delta)
     },  1000)
 }
+
 
 // oe4no = open_edit_for_new_obj
 function oe4no() {

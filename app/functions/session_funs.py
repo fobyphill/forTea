@@ -1,7 +1,7 @@
 from django.db.models import Subquery, OuterRef, Func, F
 from django.forms import model_to_dict
 
-from app.functions import convert_funs, tree_funs, convert_procedures
+from app.functions import convert_funs, tree_funs, convert_procedures, session_procedures
 from app.models import Designer, Objects, Contracts, Dictionary, TableDrafts, ContractCells, ContractDrafts, Tasks, \
     DictObjects, TechProcess, DataTypesList, ClassTypesList
 
@@ -36,9 +36,9 @@ def update_draft_tree(request, is_contract=False):
     draft_manager = ContractDrafts.objects if is_contract else TableDrafts.objects
     header_manager = Contracts.objects if is_contract else Designer.objects
     class_type = 'contract' if is_contract else 'table'
-    count_drafts = draft_manager.filter(user_id=request.user.id, data__parent_structure=OuterRef('id'))\
+    count_drafts = draft_manager.filter(user_id=request.user.id, active=True, data__parent_structure=OuterRef('id'))\
         .annotate(count=Func(F('id'), function='Count')).values('count')
-    drafts = list(header_manager.filter(formula__in=('folder', 'tree', class_type)) \
+    drafts = list(header_manager.filter(formula__in=('folder', 'tree', 'array', class_type)) \
         .annotate(quantity=Subquery(count_drafts)).values('id', 'name', 'formula', 'parent_id', 'quantity'))
     # Уложим в дерево
     if is_contract:
@@ -53,6 +53,9 @@ def update_draft_tree(request, is_contract=False):
 
 # Список классов превращаем в дерево черновиков
 def draft_to_tree(tree, parents):
+    sort_order = {'folder': 0, 'table': 1, 'contract': 2, 'alias': 3, 'array': 4, 'dict': 5, 'tree': 6, 'tp': 7,
+                  'techprocess': 8}
+    tree.sort(key=lambda x: sort_order[x['formula']])
     i = 0
     while i < len(parents):
         # 1. Найдем детей
@@ -290,23 +293,7 @@ def update_omtd(request):
                 request.session['temp_object_manager']['arrays'] = list_arrays
         # загрузим техпроцессы (2.0) для контрактов и массивов
         if current_class.formula in ('contract', 'array') and location == 'contract':
-            tpos = TechProcess.objects.filter(parent_id=current_class.id, formula='tp')
-            tpos_ids = [t.id for t in tpos]
-            tpos_params = list(TechProcess.objects.filter(parent_id__in=tpos_ids).values())
-            tps = []
-            for t in tpos:
-                my_params = [tp for tp in tpos_params if tp['parent_id'] == t.id]
-                sys_params = []
-                stages = []
-                for mp in my_params:
-                    if mp['settings']['system']:
-                        sys_params.append(mp)
-                    else:
-                        stages.append(mp)
-                tp = {'id': t.id, 'name': t.name, 'parent_id': t.parent_id, 'cf': t.value['control_field'],
-                      'system_params': sys_params, 'stages': stages}
-                tps.append(tp)
-            request.session['temp_object_manager']['tps'] = tps
+            request.session['temp_object_manager']['tps'] = session_procedures.atic(current_class.id)
 
     if not 'temp_object_manager' in request.session or not request.session['temp_object_manager']:
         fill_omdt()

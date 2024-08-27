@@ -10,7 +10,8 @@ from app.templatetags.my_filters import datetime_string_to_russian
 @view_procedures.is_auth_app
 def tasks(request):
     timestamp = datetime.today()
-    dict_kind = {'prop': 'Свойство', 'stage': 'Стадия', 'cf': 'Контрольное поле', 'cotc': 'Завершение контракта'}
+    dict_kind = {'prop': 'Свойство', 'stage': 'Стадия', 'cf': 'Контрольное поле', 'cotc': 'Завершение контракта',
+                 'do': 'Отложенный объект'}
 
     def get_stage_task(t):
         parent_code = t['data']['parent_code'] if 'parent_code' in t['data'] else None

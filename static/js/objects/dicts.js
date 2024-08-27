@@ -22,7 +22,7 @@ function add_dict() {
     let dict_id = select.value
     // Работаем с выпадающим списком
     for (let i = 0; i < select.children.length; i++){
-        if (select.options[i].value == dict_id){
+        if (select.options[i].value === dict_id){
             select.remove(i)
             break
         }
@@ -176,7 +176,7 @@ function dict_link_promp(this_input, delay_promp=true){
                     for (let i = 0; i < data.length; i++){
                         let op = document.createElement('option')
                         op.value = data[i].code
-                        op.innerText = (match_link[1] === 'contract') ? data[i].value.datetime_create : data[i].value
+                        op.innerText = data[i].value
                         datalist.append(op)
                     }
                 }

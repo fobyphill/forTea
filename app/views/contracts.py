@@ -1,13 +1,9 @@
 import copy
 import json
 import math
-import operator
-import re
-
 import plotly.graph_objects as go
 import networkx as nx
 from datetime import datetime
-from functools import reduce
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models.functions import Cast
@@ -293,7 +289,7 @@ def manage_contracts(request):
                         val = True
                     if new_unit_name:
                         Contracts(parent_id=new_unit.id, formula=formula, name=new_unit_name, value=val,
-                                  is_required=True, is_visible=False, priority=1).save()
+                                  is_required=True, is_visible=False, priority=1, delay={'delay': False, 'handler': False}).save()
                         # для дерева добавим дополнительные поля - имя, родитель
                         if request.POST['s_folder_class'] == 'tree':
                             Contracts(parent_id=new_unit.id, formula='string', name='name', is_required=True,
@@ -682,18 +678,11 @@ def manage_contracts(request):
                                     is_change = True
 
                                 # работаем с делэем
-                                if 'delay' in p and p['delay']['delay'] and 'handler' in p['delay'] \
-                                        and type(p['delay']['handler']) is int \
-                                        and p['delay']['handler']\
-                                        and not database_procedures.check_user(p['delay']['handler']):
+                                p['delay']['handler'] = cp.delay['handler'] if cp.delay and 'handler' in cp.delay else None
+                                if p['delay']['delay'] and type(p['delay']['handler']) is int \
+                                    and not database_procedures.check_user(p['delay']['handler']):
                                     is_valid = False
                                     message += 'Некорректно указан отвветственный к отложенному значению параметра ID:' + str(p['id']) + '<br>'
-
-                                if not cp.delay:
-                                    is_change = True
-                                    incoming['delay'] = cp.delay
-                                    outcoming['delay'] = p['delay']
-                                    cp.delay = p['delay']
                                 elif cp.delay != p['delay']:
                                     is_change = True
                                     incoming['delay'] = cp.delay
@@ -1780,6 +1769,10 @@ def contract(request):
                         tasks = Tasks.objects.filter(data__class_id=class_id, data__code=code)
                         for t in tasks:
                             task_funs.delete_simple_task(t, timestamp, parent_transact=transact_id)
+                        # Удалим связанные черновики
+                        ContractDrafts.objects.filter(data__parent_structure=class_id, data__code=code).delete()
+
+
                 if not is_valid:
                     message_class = 'text-red'
             else:
@@ -1800,7 +1793,8 @@ def contract(request):
 
         # Кнопка "В черновик"
         elif 'b_draft' in request.POST:
-            message += interface_funs.make_graft(request, code, True)[1]
+            interface_funs.make_graft(request, current_class.id, class_params, code, request.user.id, True,
+                                                 tps_info=request.session['temp_object_manager']['tps'])
             message += 'Черновик был создан<br>'
 
         if tree:
