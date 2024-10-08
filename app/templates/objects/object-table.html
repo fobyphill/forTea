@@ -77,7 +77,7 @@
                     {% elif h.formula == 'array' %}  {# Если тип данных - массив #}
                     {% elif h.formula == 'file' %}
                         {% with enum_object=object|get_item:h.id %}
-                            {{ enum_object.value|slice:"14:" }}
+                            {{ enum_object.value|slice:"14:"|default:"" }}
                         {% endwith %}
                     {% elif h.formula == 'float' %}
                         {% with float_object=object|get_item:h.id %}

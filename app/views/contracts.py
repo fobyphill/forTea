@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models.functions import Cast
 from django.shortcuts import redirect
-from django.db.models import Q, OuterRef, Subquery, FloatField
+from django.db.models import Subquery, FloatField
 from django.forms import model_to_dict
 from django.http import HttpResponseRedirect, HttpResponse
 from django.shortcuts import render
@@ -240,6 +240,13 @@ def manage_contracts(request):
                                             parent_id=parent_id, is_required=0)
                     new_unit.save()
                     class_id = new_unit.id
+                    # добавим в форму айди созданного класса
+                    request.POST._mutable = True
+                    request.POST['i_id'] = new_unit.id
+                    if request.POST['s_folder_class'] == 'dict':
+                        request.POST['is_dict'] = 'true'
+                    request.POST._mutable = False
+
                     # для контракта создадим статические поля - BR, LM, T, CC
                     if new_unit.formula == 'contract':
                         Contracts(name='business_rule', formula='eval', is_required=True, is_visible=False,
@@ -555,7 +562,7 @@ def manage_contracts(request):
 
         # Сохранить параметры класса
         elif 'b_save_fields' in request.POST:
-            if not 'i_id' in request.GET:
+            if not class_id:
                 message = 'Не выбран контракт. Изменения не сохранены<br>'
                 message_class = 'text-red'
             else:
@@ -635,18 +642,12 @@ def manage_contracts(request):
                                             cp.settings = {'totals': p['totals']}
                                         is_change = True
                                 if 'is_required' in p and cp.is_required != p['is_required']:
-                                    # проверка, есть ли дефолт для обязательных полей
-                                    if p['is_required'] and cp.formula not in ('eval', 'enum', 'file', 'bool') and not \
-                                    p['default']:
-                                        is_valid = False
-                                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
-                                    else:
-                                        # Регистрирую изменение
-                                        incoming['is_required'] = cp.is_required
-                                        outcoming['is_required'] = p['is_required']
-                                        cp.is_required = p['is_required']
-                                        is_change = True
-                                        change_required = True
+                                    # Регистрирую изменение
+                                    incoming['is_required'] = cp.is_required
+                                    outcoming['is_required'] = p['is_required']
+                                    cp.is_required = p['is_required']
+                                    is_change = True
+                                    change_required = True
                                 # Работаем с полем "Значение"
                                 # тип ссылка или формула
                                 if p['type'] in ['eval', 'enum']:
@@ -696,7 +697,7 @@ def manage_contracts(request):
                                             transact_id = reg_funs.get_transact_id(header.id, 0, 'c')
                                         names_params = [cc.name for cc in Contracts.objects.filter(parent_id=class_id)]
                                         message = 'контракт "' + request.POST['i_name'] + '" ID:' \
-                                                  + request.GET['i_id'] + ' обновлен<br>'
+                                                  + request.POST['i_id'] + ' обновлен<br>'
                                         # регистрация
                                         reg = {
                                             'json_income': incoming,
@@ -752,10 +753,6 @@ def manage_contracts(request):
                             message += 'Некорректно указан ID константы. Новый параметр не сохранен<br>'
                     if p['type'] == 'enum':
                         p['value'] = p['value'].split('\n')
-                    # Проверка обязательности
-                    if p['is_required'] and p['type'] not in ('file', 'enum', 'eval', 'bool') and not p['default']:
-                        is_valid = False
-                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
                     # Если все проверки пройдены - создаем параметр
                     if is_valid:
                         # зададим приоритет
@@ -1603,8 +1600,14 @@ def contract(request):
         if not 'contract_draft_tree' in request.session:
             session_funs.update_draft_tree(request, True)
 
-        session_funs.update_omtd(request)  # проверим временные данные менеджера объектов в сессии
-        headers = request.session['temp_object_manager']['headers']
+        # проверим временные данные менеджера объектов в сессии
+        tom_updated = session_funs.update_omtd(request)
+        tom = request.session['temp_object_manager']
+        headers = tom['headers']
+        tree = tom['tree'] if 'tree' in tom else None
+        if tree and tom_updated:
+            tree[0]['children'] = tree_funs.get_branch_props(tree[0]['children'], tom['current_class']['parent'],
+                                                             tom['tree_headers'], request.user.id)
         # Редиректим из гет в пост
         to_post_redirect = interface_funs.get_to_post(request, ('class_id', ))
         if to_post_redirect:
@@ -1709,7 +1712,6 @@ def contract(request):
                     is_valid = False
                     message += res_check_child
 
-
                 if is_valid:
                     transact_id = reg_funs.get_transact_id(class_id, code, 'c')
                     objects_delete = ContractCells.objects.filter(code=code, parent_structure_id=class_id).select_related('name')
@@ -1772,7 +1774,6 @@ def contract(request):
                         # Удалим связанные черновики
                         ContractDrafts.objects.filter(data__parent_structure=class_id, data__code=code).delete()
 
-
                 if not is_valid:
                     message_class = 'text-red'
             else:
@@ -1823,11 +1824,11 @@ def contract(request):
         visible_headers, vhids = interface_procedures.pack_vis_headers(current_class, headers, True)
         objects = ContractCells.objects.filter(code__in=paginator['items_codes'], parent_structure_id=class_id,
                                                name_id__in=vhids)
-        objects = convert_funs.queyset_to_object(objects)
+        objects = convert_funs.queryset_to_object(objects)
         objects.sort(key=lambda x: x['code'], reverse=True)
 
         # Конвертнем поля
-        convert_funs.prepare_table_to_template([h for h in headers if h['is_visible']], objects, request.user.id, True)
+        convert_funs.prepare_table_to_template(visible_headers, objects, request.user.id, True)
         # # добавим техпроцессы
         lcf2 = []
         if 'my_tps' in request.session['temp_object_manager']:
@@ -1895,7 +1896,7 @@ def view_alias(request):
     class_id = int(request.GET['class_id'])
     header = Contracts.objects.get(id=class_id)
     alias = list(Contracts.objects.filter(parent_id=class_id).values())
-    convert_funs2.pati(alias, user_id=request.user.id)
+    convert_funs2.pati(alias, user_id=request.user.id, is_contract=True)
     ctx = {
         'title': 'Константа "' + header.name + '"',
         'alias': alias,

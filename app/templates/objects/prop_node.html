@@ -21,7 +21,7 @@
             {% endif %}
         {% endwith %}
     </td>
-    {% for vh in visible_headers %}
+    {% for vh in tree_visible_headers %}
         <td class="col-1-5 text-center" style="padding: 0">
             {% with val=t.props|get_item:vh.id %}
                 {% if val.value %}

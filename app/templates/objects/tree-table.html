@@ -4,7 +4,7 @@
     <thead>
         <tr style="cursor: pointer;" class="row">
             <th class="col">Ветка</th>
-            {% if visible_headers %}
+            {% if tree_visible_headers %}
                 {% for tvh in tree_visible_headers %}
                     <th class="col-1-5 text-center">{{ tvh.name }}</th>
                 {% endfor %}

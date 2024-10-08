@@ -1,9 +1,6 @@
-import copy
-import json
-import os
-import re
+import copy, json, os, re
 from datetime import datetime
-
+from app.other.global_vars import root_folder
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, OuterRef, Subquery, F, FloatField, CharField, ExpressionWrapper, Func
 from django.db.models.functions import Cast
@@ -11,8 +8,7 @@ from django.forms import model_to_dict
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.utils.encoding import iri_to_uri
-from forteatoo.settings import DATABASES as dbses
-
+from app.other.global_vars import is_mysql
 import app.functions.files_funs
 import app.functions.reg_funs
 from app.functions import database_funs, files_funs, database_procedures, reg_funs, interface_procedures, convert_funs, \
@@ -405,11 +401,11 @@ def download_file(request, is_contract=False):
     file_name = request.POST['i_filename_' + id]
     files_date = file_name[4:8] + '-' + file_name[2:4] + '-' + file_name[:2]
     class_folder = 'contract_' if is_contract else 'table_'
-    file = os.path.join('static', 'database_files_history', class_folder + request.GET['class_id'], files_date, file_name)
+    file = os.path.join(root_folder, 'static', 'database_files_history', class_folder + request.GET['class_id'], files_date, file_name)
     if os.path.exists(file):
         return get_file(file)
     else:
-        file = os.path.join('database_files_draft', class_folder + request.GET['class_id'], files_date, file_name)
+        file = os.path.join(root_folder, 'database_files_draft', class_folder + request.GET['class_id'], files_date, file_name)
         if os.path.exists(file):
             return get_file(file)
         else:
@@ -437,7 +433,7 @@ def delete_file(request, class_params, is_contract=False):
         transact_id = reg_funs.get_transact_id(current_header['parent_id'], request.POST['i_code'], location[0])
         timestamp = datetime.now()
         reg_funs.simple_reg(request.user.id, 15, timestamp, transact_id, **reg)
-        del_file.value = ''
+        del_file.value = None
         del_file.save()
         return True
 
@@ -863,7 +859,7 @@ def save_object(request, class_id, code, current_class, class_params, **params):
                             ocd = icd.copy()
                             ocd['delay'] = jeo['new_obj'].delay
                             reg = {'json_income': icd, 'json': ocd}
-                            reg_funs.simple_reg(request.user.id, 22, timestamp, transact_id, parent_transact **reg)
+                            reg_funs.simple_reg(request.user.id, 22, timestamp, transact_id, parent_transact, **reg)
                         # Создаем / регистрируем таск
                         current_param = next(cp for cp in class_params if cp['id'] == jeo['new_obj'].name_id)
                         interface_procedures.make_task_4_delay(current_param, jeo['new_obj'], 't', request.user,
@@ -1201,6 +1197,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                             # добавим в словарь редактирования не новое значение, а дельту
                             if current_param['formula'] == 'float':
                                 if not old_value:    old_value = 0
+                                if not v:   v = 0
                                 edit_dict[k] = v - old_value
                             json_object['old_value'] = old_value
                         valid_delay = True
@@ -1331,7 +1328,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
                         if eo['new_obj'].name_id in control_fields:
                             prms['cf'] = True
                         interface_procedures.make_task_4_delay(current_param, eo['new_obj'], 'c', request.user, timestamp,
-                                                               delay_ppa, transact_id, parent_transact, **prms)  # Создаем / регистрируем таск
+                                                               delay_ppa, transact_id, **prms)  # Создаем / регистрируем таск
             if new_objects:
                 is_saved = True
                 ContractCells.objects.bulk_create(new_objects)
@@ -1464,7 +1461,7 @@ def save_contract_object(request, code, current_class, class_params, **params):
             if current_class.formula == 'contract':
                 # Проверка системных параметров
                 msg = contract_funs.dcsp(current_class.id, code, class_params, request.user.id, request.POST,
-                                                   request.POST, timestamp, transact_id, tps=my_tps)
+                                         request.POST, timestamp, transact_id, tps=my_tps)
                 if msg != 'ok':
                     is_valid = False
                     message += msg
@@ -2068,7 +2065,6 @@ def sandf(request, query, headers, tree=None, branch=None):
                 my_owners = owners.filter(code__in=sq_codes).values('value').distinct()
                 list_qc = [mo['value'] for mo in my_owners]
             else:
-                is_mySql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
                 query_codes = query.filter(name_id=sf['header_id'])
                 if sf['type'] == 'bool':
                     query_codes = query_codes.filter(value=True)
@@ -2087,7 +2083,7 @@ def sandf(request, query, headers, tree=None, branch=None):
                             continue
                 elif sf['type'] in ('date', 'datetime'):
                     query_codes = query_codes.filter(value__isnull=False)
-                    if is_mySql:
+                    if is_mysql:
                         query_codes = query_codes.annotate(unq_val=ExpressionWrapper(Func(F('value'), function='JSON_UNQUOTE'),
                                                              output_field=CharField()))
                     else:
@@ -2107,7 +2103,7 @@ def sandf(request, query, headers, tree=None, branch=None):
                 # другие типы данных
                 else:
                     if sf['value']:
-                        if is_mySql:
+                        if is_mysql:
                             query_codes = query_codes.filter(value__icontains=sf['value'])
                         else:
                             reg_ex = ''.join('\\' + v if not v.isalpha() else v for v in sf['value'])
@@ -2134,7 +2130,7 @@ def mardraft(class_id, owner_code, user_id, is_contract):
     obj_codes = obj_manager.filter(parent_structure_id=class_id, name__name='Собственник', value=owner_code)\
         .values('code').distinct()
     objs = obj_manager.filter(parent_structure_id=class_id, code__in=Subquery(obj_codes))
-    objs = convert_funs.queyset_to_object(objs)
+    objs = convert_funs.queryset_to_object(objs)
     for o in objs:
         my_request = interface_procedures.marefrod(class_id, is_contract, **o)
         make_graft(my_request, class_id, headers, o['code'], user_id, is_contract, False)

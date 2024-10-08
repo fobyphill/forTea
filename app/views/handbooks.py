@@ -1,13 +1,9 @@
 import json
-import operator
 import re
 from copy import deepcopy
 from datetime import datetime
-from functools import reduce
-
 from dateutil.relativedelta import relativedelta
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Q, OuterRef, Subquery
 from django.forms import model_to_dict
 from django.http import HttpResponseRedirect, HttpResponse
 from django.shortcuts import render, redirect
@@ -39,8 +35,13 @@ def manage_object(request):
         # Загрузим меню черновиков
         if not 'draft_tree' in request.session:  # загрузить дерево черновиков в сессию
             session_funs.update_draft_tree(request)
-        session_funs.update_omtd(request)  # проверим временные данные менеджера объектов в сессии
-        tree = request.session['temp_object_manager']['tree'] if 'tree' in request.session['temp_object_manager'] else None
+        # проверим временные данные менеджера объектов в сессии
+        updated = session_funs.update_omtd(request)
+        tom = request.session['temp_object_manager']
+        tree = tom['tree'] if 'tree' in tom else None
+        if tree and updated:
+            tree[0]['children'] = tree_funs.get_branch_props(tree[0]['children'], tom['current_class']['parent'],
+                                                             tom['tree_headers'], request.user.id)
 
         # Проброска данных из гет в пост
         to_post_redirect = interface_funs.get_to_post(request, ('class_id', ))
@@ -225,7 +226,7 @@ def manage_object(request):
         objects = Objects.objects.filter(code__in=paginator['items_codes'],
                                          parent_structure_id=class_id, name_id__in=vhids)\
                 .select_related('parent_structure', 'name')
-        objects = convert_funs.queyset_to_object(objects)
+        objects = convert_funs.queryset_to_object(objects)
         objects.sort(key=lambda x: x['code'], reverse=True)
         # Конвертнем поля
         convert_funs.prepare_table_to_template(visible_headers, objects, request.user.id)
@@ -445,6 +446,8 @@ def manage_class_tree(request):
                     new_unit_name = ''
                     val = ''
                     formula = ''
+                    is_visible = True
+                    is_system = False
                     if request.POST['s_folder_class'] == 'table':
                         new_unit_name = 'Наименование'
                         formula = 'string'
@@ -457,6 +460,8 @@ def manage_class_tree(request):
                         new_unit_name = 'is_right_tree'
                         formula = 'bool'
                         val = True
+                        is_system = True
+                        is_visible = False
                     elif request.POST['s_folder_class'] == 'techprocess':
                         TechProcess(name='business_rule', formula='eval', parent_id=new_unit.id).save()
                         TechProcess(name='link_map', formula='eval', parent_id=new_unit.id).save()
@@ -464,10 +469,7 @@ def manage_class_tree(request):
                         TechProcess(name='stages', formula='enum', parent_id=new_unit.id).save()
                     if new_unit_name:
                         req_field = Designer(parent_id=new_unit.id, formula=formula, name=new_unit_name, value=val,
-                                            is_required=True, is_visible=True, priority=1)
-                        if req_field.formula == 'tree':
-                            req_field.is_visible = False
-                            req_field.system = True
+                                            is_required=True, is_visible=is_visible, system=is_system, priority=1)
                         req_field.save()
                         # для дерева добавим дополнительные поля - имя, родитель
                         if request.POST['s_folder_class'] == 'tree':
@@ -787,10 +789,6 @@ def manage_class_tree(request):
                                             cp.settings = {'totals': p['totals']}
                                         is_change = True
                                 if cp.is_required != p['is_required']:
-                                    # проверка, есть ли дефолт для обязательных полей
-                                    if p['is_required'] and cp.formula not in ('eval', 'enum', 'file', 'bool') and not p['default']:
-                                        is_valid = False
-                                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
                                     # Регистрирую изменение
                                     incoming['is_required'] = cp.is_required
                                     outcoming['is_required'] = p['is_required']
@@ -828,26 +826,27 @@ def manage_class_tree(request):
                                     is_change = True
 
                                 # Delay
-                                if cp.delay != p['delay']:
-                                    # Регистрирую изменение
-                                    incoming['delay'] = cp.delay
-                                    outcoming['delay'] = p['delay']
-                                    cp.delay = p['delay']
-                                    is_change = True
-                                # Если делэй включен, проверим его настройки
-                                if p['delay'] and 'handler' in p and cp.delay_settings['handler'] != p['handler']:
-                                    incoming['delay_settings'] = {}
-                                    outcoming['delay_settings'] = {}
-                                    if p['handler'] and type(p['handler']) is int and not database_procedures.check_user(p['handler']):
-                                        is_valid = False
-                                        message += 'Некорректно указан ответственный к отложенному значению параметра ID: ' + \
-                                            str(p['id']) + '<br>'
-
-                                    if cp.delay_settings['handler'] != p['handler']:
-                                        incoming['delay_settings']['handler'] = cp.delay_settings['handler']
-                                        outcoming['delay_settings']['handler'] = p['handler']
-                                        cp.delay_settings['handler'] = p['handler']
+                                if 'delay' in p:
+                                    if cp.delay != p['delay']:
+                                        # Регистрирую изменение
+                                        incoming['delay'] = cp.delay
+                                        outcoming['delay'] = p['delay']
+                                        cp.delay = p['delay']
                                         is_change = True
+                                    # Если делэй включен, проверим его настройки
+                                    if p['delay'] and 'handler' in p and cp.delay_settings['handler'] != p['handler']:
+                                        incoming['delay_settings'] = {}
+                                        outcoming['delay_settings'] = {}
+                                        if p['handler'] and type(p['handler']) is int and not database_procedures.check_user(p['handler']):
+                                            is_valid = False
+                                            message += 'Некорректно указан ответственный к отложенному значению параметра ID: ' + \
+                                                str(p['id']) + '<br>'
+
+                                        if cp.delay_settings['handler'] != p['handler']:
+                                            incoming['delay_settings']['handler'] = cp.delay_settings['handler']
+                                            outcoming['delay_settings']['handler'] = p['handler']
+                                            cp.delay_settings['handler'] = p['handler']
+                                            is_change = True
                                 if is_change:
                                     if is_valid:
                                         all_changes = True
@@ -905,10 +904,6 @@ def manage_class_tree(request):
                             message += 'Некорректно указан ID константы. Новый параметр не сохранен<br>'
                     elif p['type'] == 'enum':
                         p['value'] = p['value'].split('\n')
-                    # Проверка обязательности
-                    if p['is_required'] and p['type'] not in ('file', 'enum', 'eval', 'bool') and not p['default']:
-                        is_valid = False
-                        message += 'Для обязательных параметров заполните поле "По умолчанию"<br>'
                     # Если все проверки пройдены - создаем параметр
                     if is_valid:
                         # зададим приоритет
@@ -1390,7 +1385,7 @@ def dictionary(request):
         object_codes = object_codes.values('code').distinct().order_by('-code')
         paginator = common_funs.paginator_object(object_codes, q_items, page_num)
         dict_objects = DictObjects.objects.filter(code__in=paginator['items_codes'], parent_structure_id=dict_id)
-        dict_objects = convert_funs.queyset_to_object(dict_objects)
+        dict_objects = convert_funs.queryset_to_object(dict_objects)
         dict_objects.sort(key=lambda x: x['code'], reverse=True)
 
         for h in headers:

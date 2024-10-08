@@ -1,4 +1,4 @@
-from app.functions import reg_funs
+from app.functions import reg_funs, session_funs
 from app.models import ContractCells, Objects
 
 
@@ -54,6 +54,24 @@ def avto(current_class, location, header, parent_transact, user_id, timestamp):
     for nr in new_reqs:
         pack_to_reg(nr, None, 13)
     reg_funs.paket_reg(list_regs)
+
+
+def get_tom(class_id, user_id, location, path_info):
+    class ReqUser:
+        id = 0
+
+    class Request:
+        GET = dict()
+        session = dict()
+        path = path_info
+        user = ReqUser()
+
+    sr = Request()  # sr - subrequest
+    sr.GET['class_id'] = class_id
+    sr.user.id = user_id
+    sr.GET['location'] = location
+    session_funs.update_omtd(sr)
+    return sr.session['temp_object_manager']
 
 
 

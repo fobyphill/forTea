@@ -4,11 +4,12 @@ import re, datetime
 # процедура нахождения маркера юзера
 from operator import itemgetter, or_, and_
 
-from django.db.models import Sum, Avg, Max, Min, FloatField
+from django.db.models import Sum, Avg, Max, Min, FloatField, Q, F
 from django.db.models.functions import Cast
 
-from app.functions import tree_funs
-from app.models import Contracts, ContractCells, Objects, Designer
+from app.functions import tree_funs, object_funs, hist_funs, convert_funs2, session_procedures
+from app.functions.convert_funs import queryset_to_object
+from app.models import Contracts, ContractCells, Objects, Designer, RegistratorLog
 
 
 def find_user(formula, user_id):
@@ -30,7 +31,7 @@ def slice_link_header(link):
 def retreive_tags(formula):
     if not formula: formula = ''
     json_parts = []
-    formuls = re.findall(r'\[\[(?:(?!\[\[).)*?\]\]', formula, re.I)
+    formuls = re.findall(r'\[\[(?:(?!\[\[)(?:.|\n))*?\]\]', formula, flags=re.I)
     for f in formuls:
         f = f[2:len(f) - 2]
         # Найдем тип данных - state, fact, delay
@@ -61,11 +62,13 @@ def retreive_tags(formula):
                         parts.append(match_last[1])
             # внешняя ссылка с фильтрами
             if not parts:
-                re_pattern = '\s*\.(\d+)\.(f(?:\d+[eqnltg]{2}(?:\d+|(?:\'.*\')|(?:\".*\"))){1}(?:\;\d+[eqnltg]{2}(?:\d+|(?:\'.*\')|(?:\".*\")))*)'
-                match_filter = re.match(re_pattern, sub, re.S)
+                re_pattern = r'\s*\.(\d+)\.(f(?:\d+[eqnltgk]{2}(?:\d+\+null|\d+|true|false|null|(?:\'.*?\'(?:\+null|))|' \
+                             r'(?:\".*?\"(?:\+null|)))){1}' \
+                             r'(?:\;\d+[eqnltgk]{2}(?:\d+\+null|\d+|true|false|null|(?:\'.*?\'(?:\+null|))|(?:\".*?\"(?:\+null|))))*)'
+                match_filter = re.match(re_pattern, sub, flags=re.S | re.IGNORECASE)
                 if match_filter:
                     parts = [match_filter[1], match_filter[2]]
-                    sub = re.sub(re_pattern, '', sub)
+                    sub = re.sub(re_pattern, '', sub, flags=re.IGNORECASE)
                     match_last = re.match(r'\s*\.(\d+)', sub)
                     if match_last:
                         parts.append(match_last[1])
@@ -87,7 +90,8 @@ def retreive_tags(formula):
 
 # парсит датувремя строку в разных форматах
 def parse_timestamp(str_datetime):
-    date_formats = ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M', '%Y-%m-%d', '%d.%m.%Y %H:%M:%S', '%d.%m.%Y')
+    date_formats = ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M', '%Y-%m-%d',
+                    '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M', '%d.%m.%Y')
     for df in date_formats:
         try:
             timestamp = datetime.datetime.strptime(str_datetime, df)
@@ -104,14 +108,27 @@ def parse_timestamp_for_hist(str_datetime, is_after=False):
     timestamp = parse_timestamp(str_datetime)
     if not timestamp:
         return False
-    timedelta = datetime.timedelta(seconds=1)
-    timestamp = timestamp - timedelta if is_after else timestamp + timedelta
+    if not is_after:
+        timestamp += datetime.timedelta(seconds=1)
     return timestamp
 
 
 def do_logical_compare(left_val, sign, right_val):
-    if not type(left_val) in (float, int) or not type(right_val) in (float, int):
+    type_lv = type(left_val)
+    type_rw = type(right_val)
+    if not type_lv in (float, int, str, bool) or not type_rw in (float, int, str, bool):
         return False
+    numbers = (float, int)
+    if type_lv in numbers or type_rw in numbers:
+        if type_rw in numbers and not type_lv in numbers or type_lv in numbers and type_rw not in numbers:
+            return False
+    elif type_lv != type_rw:
+        return False
+    if type_lv is str and sign == 'lk':
+        if left_val.lower().find(right_val.lower()) != -1:
+            return True
+        else:
+            return False
     if (left_val == right_val and sign == 'eq') or \
        (left_val != right_val and sign == 'ne') or \
        (left_val > right_val and sign == 'gt') or \
@@ -140,15 +157,15 @@ def do_agr_fun(fun, list_vals):
     return agr_fun
 
 
-def do_agr_query(fun, queryset):
+def do_agr_query(fun, queryset, field_name):
     if fun == 'sum':
-        agr_val = queryset.aggregate(sum=Sum('float_val'))['sum']
+        agr_val = queryset.aggregate(sum=Sum(field_name))['sum']
     elif fun == 'avg':
-        agr_val = queryset.aggregate(avg=Avg('float_val'))['avg']
+        agr_val = queryset.aggregate(avg=Avg(field_name))['avg']
     elif fun == 'max':
-        agr_val = queryset.aggregate(fun=Max('float_val'))['fun']
+        agr_val = queryset.aggregate(fun=Max(field_name))['fun']
     elif fun == 'min':
-        agr_val = queryset.aggregate(fun=Min('float_val'))['fun']
+        agr_val = queryset.aggregate(fun=Min(field_name))['fun']
     elif fun == 'count':
         agr_val = queryset.count()
     else:
@@ -225,30 +242,50 @@ def gc1b(class_header, code, node, is_contract,):
                                value__in=parent_codes).values('code').distinct()]
     return source_codes
 
-# fobc = filter objects by conds
-def fobc(objs, conds, logical_sign):
-    filtred_objs = []
-    find_conds = re.findall(r'(\d+[eqgtln]{2}\d+)', conds)
+# gaoc = get array of conds
+def gaoc(str_conds):
+    conds = re.findall(r'\d+[eqnltgk]{2}.+?(?:;|$)', str_conds, flags=re.IGNORECASE | re.S)
     array_conds = []
-    logical_sign = or_ if logical_sign == 'or' else and_
-    for fc in find_conds:
-        exer = re.match(r'^(\d+)([eqgtln]{2})(\d+)', fc, re.S)
-        field = int(exer[1])
-        sign = exer[2]
-        val = int(exer[3])
-        array_conds.append({'field': field, 'sign': sign, 'val': val})
-    for o in objs:
-        logical_results = []
-        for ac in array_conds:
-            comp_field = o[ac['field']]['value']
-            res = do_logical_compare(comp_field, ac['sign'], ac['val'])
-            logical_results.append(res)
-        log_res = logical_results[0]
-        for i in range(1, len(logical_results)):
-            log_res = logical_sign(log_res, logical_results[i])
-        if log_res:
-            filtred_objs.append(o)
-    return filtred_objs
+    for c in conds:
+        match = re.match(r'(\d+)([eqnltgk]{2})(.+?)(?:;|$)', c)
+        array_conds.append({'header_id': int(match[1]), 'sign': match[2], 'cmp_val': match[3]})
+    return array_conds
+
+# foblc = filter object by logical conds
+def foblc(obj, headers, array_conds, logical_sign):
+    result = False
+    for ac in array_conds:
+        try:
+            header = next(h for h in headers if h['id'] == ac['header_id'])
+        except StopIteration:
+            return False
+        if not header['id'] in obj:
+            left_val = None
+        else:
+            left_val = obj[header['id']]['value']
+        cmp_val = ac['cmp_val']
+        is_done = False
+        if cmp_val[-5:].lower() == '+null':
+            if not left_val:
+                result = True
+                is_done = True
+            else:
+                cmp_val = cmp_val[:len(cmp_val) - 5]
+        if not is_done:
+            if header['formula'] in ('float', 'link'):
+                right_val = float(cmp_val)
+            elif header['formula'] == 'bool':
+                right_val = cmp_val.lower() == 'true'
+            else:
+                right_val = cmp_val[1:len(cmp_val) - 1]
+            result = do_logical_compare(left_val, ac['sign'], right_val)
+        if result:
+            if logical_sign == 'or':
+                break
+        elif logical_sign == 'and':
+            break
+    return result
+
 
 # Защитить символы для дальнейшего использования в регулярке
 # scfre = screen chars for reg exp
@@ -264,7 +301,7 @@ def scfre(str):
 # Добавить в заголовок детей при условии, что заголовок типа CONST
 # ficoitch = fill const its children
 def ficoitch(h):
-    if h['formula'] == 'const':
+    if h['formula'] == 'const' and not 'const' in h:
         if h['value'][0] == 'c':
             val = int(h['value'][9:])
             const_manager = Contracts.objects
@@ -276,6 +313,7 @@ def ficoitch(h):
 
 def str_datetime_to_rus(str_datetime):
     return str_datetime[8:10] + '.' + str_datetime[5:7] + '.' + str_datetime[:4] + ' ' + str_datetime[11:]
+
 
 # gtfol = get totals from object list
 def gtfol(objects, visible_headers, is_contract=False):
@@ -318,6 +356,7 @@ def gtfol(objects, visible_headers, is_contract=False):
 
 def dict_to_post(my_dict):
     class MyRequest:
+        GET = {}
         POST = {}
         FILES = {}
         session = {}
@@ -326,3 +365,155 @@ def dict_to_post(my_dict):
     for mk, mv in my_dict.items():
         my_request.POST[mk] = mv
     return my_request
+
+# fitoop = filter to operation
+# преобразование фильтра в логическую операцию
+def fitoop(left_val, filter, right_val):
+    if filter == 'eq':
+        return left_val == right_val
+    elif filter == 'ne':
+        return left_val != right_val
+    elif filter == 'gt':
+        return left_val > right_val
+    elif filter == 'lt':
+        return left_val < right_val
+    elif filter == 'ge':
+        return left_val >= right_val
+    elif filter == 'le':
+        return left_val <= right_val
+    elif filter == 'lk':
+        return right_val.lower() in left_val.lower()
+
+
+# renepreva = retreive next / previous value
+def renepreva(base_query, code, timestamp, is_after, location, name_id, data_type):
+    q = Q(date_update__gt=timestamp) if is_after else Q(date_update__lt=timestamp)
+    order_by = 'date_update' if is_after else '-date_update'
+    query = base_query.filter(q, json__location=location, json__code=code, json__name=name_id, reg_name__in=(13, 15)) \
+              .values('json').order_by(order_by)[:1]
+    if query:
+        if query[0]['json']['value']:
+            return query[0]['json']['value']
+        else:
+            return 0 if data_type == 'float' else ''
+    elif is_after:
+        return renepreva(base_query, code, timestamp, False, location, name_id, data_type)
+    else:
+        return 0 if data_type == 'float' else ''
+
+
+# ficlubraco = filter_cluster_branch_codes
+def ficlubraco(codes, base_query, timestamp, location, branch_id, cluster_branch_codes, future_codes=False):
+    q = Q(date_update__gt=timestamp) if future_codes else Q(date_update__lt=timestamp)
+    i = 0
+    while i < len(codes):
+        branch = base_query.filter(q, reg_name__in=(13, 15), json__location=location, json__name=branch_id,
+                                   json__code=codes[i]['code']).order_by('-date_update')[:1]
+        if not branch:
+            codes.pop(i)
+        elif branch[0].json['value'] not in cluster_branch_codes:
+            codes.pop(i)
+        else:
+            i += 1
+    return codes
+
+
+# gvfo = get versions from objects
+def gvfo(class_id, str_date, is_contract, is_after, user_id, source_codes=[]):
+    version = parse_timestamp_for_hist(str_date, is_after)
+    manager = ContractCells.objects if is_contract else Objects.objects
+    path_info = '/contract' if is_contract else '/manage-object'
+    loc = 'contract' if is_contract else 'table'
+    tom = session_procedures.fill_tom(class_id, path_info, '', user_id, hide_tree=True)
+    base_query = RegistratorLog.objects.filter(json_class=class_id)
+    deleted_codes = base_query.filter(reg_name=16, date_update__lt=version, json_income__location=loc) \
+        .annotate(code=F('json_income__code')).values('code').distinct()
+    deleted_codes = [dc['code'] for dc in deleted_codes]
+    exist_codes = base_query.filter(reg_name__in=(13, 15), date_update__lt=version, json__location=loc) \
+                       .annotate(code=F('json__code')).values('code').distinct().exclude(code__in=deleted_codes)
+    if source_codes:
+        exist_codes = exist_codes.filter(code__in=source_codes)
+    exist_codes = list(exist_codes)
+    objects = []
+    if not is_after:
+        version -= datetime.timedelta(seconds=1)
+    else:
+        future_codes = list(base_query.filter(date_update__gt=version, reg_name=13) \
+                            .annotate(code=F('json__code')).values('code').distinct())
+        exist_codes += future_codes
+    for ex_co in exist_codes:
+        if is_after:
+            next_change = base_query.filter(json__code=ex_co['code'], date_update__gt=version,
+                                            reg_name__in=(13, 15, 8)).order_by('date_update')[:1]
+            if next_change:
+                if next_change[0].reg_name == 8:
+                    continue
+                obj = hist_funs.gov(class_id, ex_co['code'], loc, next_change[0].date_update, tom, user_id, children=False)
+            else:
+                obj = manager.filter(parent_structure_id=class_id, code=ex_co['code'])
+                obj = convert_funs2.get_full_object(obj, tom['headers'], loc)
+        else:
+            obj = hist_funs.gov(class_id, ex_co['code'], loc, version, tom, user_id, children=False)
+        if obj:
+            objects.append(obj)
+    return objects, tom
+
+
+# Преобразовывает формулу вида [[user_data]] в html-теги
+def userdata_to_interface(header, code, is_contract, is_main_page):
+    dict_types = {'string': 'text', 'number': 'number', 'bool': 'checkbox', 'date': 'date',
+                  'datetime': 'datetime-local', 'link': 'number'}
+    user_data = re.findall(r'\[\[\s*\n*\s*user_data_\d+\s*\n*\s*(?:\{\{[\w\W]*?\}\}|)\s*\n*\s*\]\]', header['value'],
+                           flags=re.M)
+    val = ''
+    if user_data:
+        calc_button_label = 'Рассчитать'
+        for ud in user_data:
+            find_data = re.search(r'user_data_(\d+)\s*\n*\s*(?:\{\{([\w\W]*)\}\}|)', ud, flags=re.M)
+            val += '<div class="input-group mb-3">'
+            val += '<span class="input-group-text">'
+            # Разберем опциональные параметры
+            label = 'Пользовательская переменная №' + find_data[1]
+            data_type = 'text'
+            data_list = ''
+            link_class = '0'
+            link_location = 't'
+            if find_data[2]:
+                find_label = re.search(r'label\s*\n*\s*=\s*\n*\s*\'([\w\s\_]+)\'', find_data[2])
+                if find_label:
+                    label = find_label[1]
+                find_type = re.search(r'type\s*\n*\s*=\s*\n*\s*(string|number|bool|datetime|date|link)', find_data[2])
+                if find_type:
+                    data_type = dict_types[find_type[1]]
+                    if find_type[1] == 'link':
+                        data_list = '<datalist id="dl_' + str(header['id']) + '_' + label + '"></datalist>'
+                        find_link_class = re.search(r'link_class\s*\n*\s*=\s*\n*\s*(\d+)', find_data[2])
+                        if find_link_class:
+                            link_class = find_link_class[1]
+                        find_link_location = re.search(r'link_location\s*\n*\s*=\s*\n*\s*([tc])', find_data[2])
+                        if find_link_location:
+                            link_location = find_link_location[1]
+                find_button_label = re.search(r'button\s*\n*\s*=\s*\n*\s*\'([\w\s\_]+)\'', find_data[2])
+                if find_button_label:
+                    calc_button_label = find_button_label[1]
+            val += label
+            val += '</span>'
+            val += '<input id="const_' + str(header['id']) + '_user_data_' + find_data[1] + '" class= "form-control" ' \
+                                                                                        'type="' + data_type + '"'
+            if data_type == 'number':
+                val += ' step="any"'
+            if data_list:
+                val += ' list="dl_' + str(header['id']) + '_' + find_data[1] + '" oninput="promp_direct_link(this, \'' \
+                       + link_location + '\', ' + link_class + ')"><datalist id="dl_' + str(header['id']) \
+                       + '_' + find_data[1] + '"></datalist'
+            val += '></div>'
+
+        str_is_contract = str(is_contract).lower()
+        fun_name = 'cmpf(' + str(header['id']) + ')' if is_main_page else 'calc_user_data(' + str(header['id']) + ', ' \
+                    + str(code) + ', ' + str_is_contract + ')'
+        val = val[
+              :-6] + f'<div class="input-group-append"><button class="btn btn-outline-secondary" onclick="{fun_name}"' \
+              + '>' + calc_button_label + '</button></div></div>'
+        val += '<div id="div_const_' + str(header['id']) + '_result"></div>'
+    return val
+

@@ -17,7 +17,7 @@ from app.functions import view_procedures, interface_funs, convert_funs, session
 from app.models import TableDrafts, Designer, ContractDrafts, Contracts, ContractCells, Objects, TechProcess, \
     RegistratorLog, TechProcessObjects, DictObjects, Dictionary, MainPageConst
 from django.contrib.auth import get_user_model
-from forteatoo.settings import DATABASES as dbses
+from app.other.global_vars import is_mysql
 
 
 @view_procedures.is_auth
@@ -78,7 +78,6 @@ def retreive_object_drafts(request):
 def get_users(request):
     User = get_user_model()
     user_data = request.GET['user_data']
-    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     if user_data:
         try:
             user_id = int(request.GET['user_data'])
@@ -142,7 +141,6 @@ def get_business_rule(request):
 @view_procedures.if_error
 # gc4lp = get classes for link promp
 def gc4lp(request):
-    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     manager = Contracts.objects if request.GET['class_type'] == 'contract' else Designer.objects
     base_classes = manager.filter(formula=request.GET['class_type'])
     if request.GET['class_val']:
@@ -201,7 +199,7 @@ def gfob(request):
     object_manager = ContractCells.objects if request.GET['location'] == 'c' else Objects.objects if \
         request.GET['location'] == 't' else DictObjects.objects
     object = object_manager.filter(parent_structure_id=class_id, code=code)
-    object = convert_funs.queyset_to_object(object)
+    object = convert_funs.queryset_to_object(object)
     is_contract = True if request.GET['location'] == 'c' else False
     formula_array_headers = [h for h in tom['headers'] if h['formula'] in ('array', 'eval')]
     convert_funs.prepare_table_to_template(formula_array_headers, object, request.user.id, is_contract)
@@ -244,7 +242,7 @@ def do_cc(request):
     code = int(request.GET['code'])
     cc = list(Contracts.objects.filter(parent_id=class_id, name='completion_condition').values())[0]
     object = ContractCells.objects.filter(parent_structure_id=class_id, code=code)
-    object = convert_funs.queyset_to_object(object)
+    object = convert_funs.queryset_to_object(object)
     result = contract_funs.do_business_rule(cc, object[0], request.user.id)
     return HttpResponse(json.dumps(result, ensure_ascii=False), content_type="application/json")
 
@@ -269,8 +267,12 @@ def calc_user_formula(request):
     for lp in list_params:
         our_const['value'] = re.sub(r'\[\[\s*\n*\s*user_data_' + lp['id'] + '[\w\W]*?\]\]', lp['value'],
                                     our_const['value'], flags=re.M)
-    convert_funs.deep_formula(our_const, (our_const, ), request.user.id, is_contract)
-    return HttpResponse(json.dumps(our_const[our_const['id']]['value'], ensure_ascii=False), content_type="application/json")
+        if lp['value'][:17] == "datetime.strptime":
+            our_const['value'] = 'from datetime import datetime\n' + our_const['value']
+    code = int(request.GET['code']) if 'code' in request.GET else 0
+    obj = {'parent_structure': our_const['parent'], 'code': code}
+    convert_funs.deep_formula(our_const, (obj, ), request.user.id, is_contract)
+    return HttpResponse(json.dumps(obj[our_const['id']]['value'], ensure_ascii=False), content_type="application/json")
 
 
 # cmpf = calc main page formula

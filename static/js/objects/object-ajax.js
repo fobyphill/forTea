@@ -254,6 +254,7 @@ function recount_alias(this_select) {
 
 }
 
+
 function fast_get_link(this_input,class_type='t'){
     let link_code = this_input.value
     let header_id = this_input.id.match(/i_link_(\d+)/)[1]

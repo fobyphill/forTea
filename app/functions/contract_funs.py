@@ -424,7 +424,7 @@ def vocobru(br, user_id):
     obj_codes = ContractCells.objects.filter(parent_structure_id=br['parent']).values('code').distinct()
     for oc in obj_codes:
         obj = ContractCells.objects.filter(parent_structure_id=br['parent'], code=oc['code'])
-        obj = convert_funs.queyset_to_object(obj)
+        obj = convert_funs.queryset_to_object(obj)
         convert_funs.deep_formula(br, obj, user_id, True)
         val = obj[0][br['id']]['value']
         if not val:

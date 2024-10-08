@@ -37,7 +37,13 @@ def tree(request):
                                                                        request.session[class_tree], None, is_contract)
     if not 'draft_tree' in request.session:  # загрузить дерево черновиков в сессию
         session_funs.update_draft_tree(request, is_contract)
-    session_funs.update_omtd(request)  # проверим временные данные менеджера объектов в сессии
+    # проверим временные данные менеджера объектов в сессии
+    updated = session_funs.update_omtd(request)
+    tree = request.session['temp_object_manager']['tree']
+    headers = request.session['temp_object_manager']['headers']
+    if updated:
+        tree = tree_funs.get_branch_props(tree, class_id, headers, request.user.id, is_contract)
+
     # Загрузим параметры из GET в POST
     to_post_redirect = interface_funs.get_to_post(request, ('class_id', 'location'))
     if to_post_redirect:
@@ -54,8 +60,6 @@ def tree(request):
             parent = int(float(request.POST['i_parent']))
     else:   parent = None
     timestamp = datetime.now()
-    tree = request.session['temp_object_manager']['tree']
-    headers = request.session['temp_object_manager']['headers']
     if code:
         branch = tree_funs.find_branch(tree, 'code', code)
         if not branch:
@@ -465,23 +469,22 @@ def tree(request):
         str_date_from = datetime.strftime(date_from, '%Y-%m-%dT%H:%M')
     if date_to < date_from:
         date_to, date_from = date_from, date_to
-
-
-
-    timeline = hist_funs.roh(class_id, branch['code'], location, date_from, date_to,
-                             request.session['temp_object_manager'])
-    if timeline['timeline']:
-        last_event = convert_procedures.str_datetime_to_rus(timeline['timeline'][-1]['date_update']) + \
-                     ' ' + timeline['timeline'][-1]['user']
+    if branch:
+        timeline = hist_funs.roh(class_id, branch['code'], location, date_from, date_to, request.session['temp_object_manager'])
+        if timeline['timeline']:
+            last_event = convert_procedures.str_datetime_to_rus(timeline['timeline'][-1]['date_update']) + \
+                         ' ' + timeline['timeline'][-1]['user']
+        else:
+            last_rec = RegistratorLog.objects.filter(reg_name_id__in=(13, 15), json_class=class_id,
+                                                     json__code=branch['code'],
+                                                     json__type='tree', json__location=location).order_by('-date_update') \
+                           .select_related('user').values('date_update', 'user__first_name', 'user__last_name')[:1]
+            last_event = datetime.strftime(last_rec[0]['date_update'], '%d.%m.%Y %H:%M:%S') + ' ' + \
+                         last_rec[0]['user__first_name'] + ' ' + last_rec[0]['user__last_name'] if last_rec else ''
+        page_quantity = int(int(len(timeline['timeline']) - 1) / 10 + 1)
+        max_pos = 9 if page_quantity > 1 else len(timeline['timeline']) - 1
     else:
-        last_rec = RegistratorLog.objects.filter(reg_name_id__in=(13, 15), json_class=class_id,
-                                                 json__code=branch['code'],
-                                                 json__type='tree', json__location=location).order_by('-date_update') \
-                       .select_related('user').values('date_update', 'user__first_name', 'user__last_name')[:1]
-        last_event = datetime.strftime(last_rec[0]['date_update'], '%d.%m.%Y %H:%M:%S') + ' ' + \
-                     last_rec[0]['user__first_name'] + ' ' + last_rec[0]['user__last_name'] if last_rec else ''
-    page_quantity = int(int(len(timeline['timeline']) - 1) / 10 + 1)
-    max_pos = 9 if page_quantity > 1 else len(timeline['timeline']) - 1
+        last_event = None; str_date_from = None; str_date_to = None; timeline = None; page_quantity = None; max_pos = None
     timeline_data = {'last_event': last_event, 'date_from': str_date_from, 'date_to': str_date_to,
                      'timeline_array': timeline, 'page_quantity': page_quantity, 'max_pos': max_pos}
     session_funs.crqd(request, is_contract)  # контрольный пересчет количества черновиков
@@ -492,7 +495,7 @@ def tree(request):
         'branch': branch,
         'fnd_tree': fnd_tree,
         'show_find_result': show_find_result,
-        'visible_headers': visible_headers,
+        'tree_visible_headers': visible_headers,
         'is_contract': is_contract,
         'db_loc': location[0],
         'timeline_data': timeline_data

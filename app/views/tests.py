@@ -6,7 +6,7 @@ from functools import reduce
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.db.models import F, Value, CharField, Q, Subquery, OuterRef, FloatField, DateTimeField, TextField, Func, \
-    ExpressionWrapper
+    ExpressionWrapper, Sum, Avg
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, TruncDate, JSONObject, Upper
 from django.http import HttpResponse
@@ -20,12 +20,14 @@ from app.functions.api_funs import get_object_list
 from app.models import RegName, Objects, Designer, Contracts, RegistratorLog, ContractCells, TablesCodes, Dictionary, \
     TechProcessObjects, TechProcess, OtherCodes, Tasks, DictObjects
 import pandas as pd
+from django.db.models.functions import Upper
 
 
 @view_procedures.is_auth_app
 def tests(request):
-    update_funs.run_delays()
-    return HttpResponse('ok')
+    date_from = datetime(2000, 1, 1)
+    my_objs = api_funs2.get_object_hist(258, 4, date_from)
+    return HttpResponse(str(my_objs))
 
 
 def tests_template(request):

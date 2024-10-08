@@ -593,7 +593,7 @@ def marefo(class_id, owner_code, parent_object_id, user_id, is_contract, **param
     obj_manager = ContractCells.objects if is_contract else Objects.objects
     obj_codes = obj_manager.filter(parent_structure_id=class_id, name__name='Собственник', value=owner_code).values('code').distinct()
     objs = obj_manager.filter(parent_structure_id=class_id, code__in=Subquery(obj_codes))
-    objs = convert_funs.queyset_to_object(objs)
+    objs = convert_funs.queryset_to_object(objs)
 
     class MyRequest:
         POST = {}

@@ -53,15 +53,21 @@ def gov(class_id, code, location, timestamp, tom, user_id, **params):
     for h in headers:
         if h['formula'] != 'eval':
             if h['name'] == 'system_data' and location == 'contract':
-                try:
-                    sys_data_now = ContractCells.objects.get(parent_structure_id=class_id, code=code, name_id=h['id'])
-                except ObjectDoesNotExist:
+                create_sys_data = base_hist.filter(reg_name=13, json__name=h['id']).order_by('id')[:1]
+                if create_sys_data:
+                    sys_data_now = create_sys_data[0]
+                else:
                     return {}
-                val = sys_data_now.value
+                val = sys_data_now.json['value']
                 delay = None
             else:
                 hist_prop = base_hist.filter(reg_name_id__in=(13, 15), json__name=h['id']).order_by('-date_update')[:1]
-                val = hist_prop[0].json['value'] if hist_prop and 'value' in hist_prop[0].json else None
+                if hist_prop and 'value' in hist_prop[0].json:
+                    val = hist_prop[0].json['value']
+                elif h['formula'] == 'bool':
+                    val = False
+                else:
+                     val = None
                 if 'delay' in h:
                     if type(h['delay']) is bool and h['delay'] or type(h['delay']) is dict and h['delay']['delay']:
                         hist_delay = base_hist.filter(reg_name_id=22, json__name=h['id']).order_by('-date_update', '-id')[:1]

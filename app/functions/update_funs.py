@@ -1,5 +1,6 @@
 import datetime
 import copy
+import os
 import re
 
 from django.db import transaction
@@ -9,6 +10,8 @@ from app.functions import reg_funs, task_funs, contract_funs, interface_procedur
     interface_funs, files_funs
 from app.models import Tasks, ContractCells, Objects, Registrator, TechProcess, TechProcessObjects, Contracts, Designer, \
     ContractDrafts, TableDrafts
+
+from app.other.global_vars import root_folder
 
 
 def run_delays(props=None):
@@ -248,10 +251,11 @@ def run_delays(props=None):
 # тестовый апдейт
 def test_upd():
     today = datetime.datetime.today()
-    Registrator(user_id=4, reg_name_id=14, date_update=today).save()
+    # Registrator(user_id=4, reg_name_id=14, date_update=today).save()
     upd_to_log(today)
 
 
 def upd_to_log(today):
-    with open("log.txt", "a") as myfile:
+    log_path = os.path.join(root_folder, 'log.txt')
+    with open(log_path, "a") as myfile:
         myfile.write("Запись в БД " + datetime.datetime.strftime(today, '%d.%m.%Y %H:%M:%S') + '\n')

@@ -8,7 +8,7 @@ from django.db.models.fields.json import KeyTextTransform
 from django.http import HttpResponse
 from app.functions import convert_funs, convert_procedures, view_procedures, session_funs, hist_funs
 from app.models import Objects, Designer, Contracts, ContractCells, Dictionary, RegistratorLog, DictObjects
-from forteatoo.settings import DATABASES as dbses
+from app.other.global_vars import is_mysql
 
 
 @view_procedures.if_error_json
@@ -92,7 +92,6 @@ def get_classes(request):
             formula = request.session['class_types'].keys()
         else:
             formula = request.GET['type_class'],
-        is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
         # Работаем с классами
         if request.GET['current_class']:
             dicts = Dictionary.objects.filter(formula='dict')
@@ -144,7 +143,6 @@ def get_classes(request):
 @view_procedures.is_auth
 def get_name(request):
     try:
-        is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
         class_types = request.session['class_types'].keys()
         # Работаем с классами
         if request.GET['current_name']:
@@ -220,7 +218,6 @@ def retreive_const_list(request):
 @view_procedures.is_auth
 @view_procedures.if_error
 def promp_link(request):
-    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     manager = Contracts.objects if request.GET['is_contract'] == 'true' else Designer.objects
     header = manager.get(id=request.GET['header_id'])
     parent_type, parent_id = convert_procedures.slice_link_header(header.value)
@@ -256,7 +253,6 @@ def promp_link(request):
 @view_procedures.is_auth
 @view_procedures.if_error
 def promp_direct_link(request):
-    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     class_manager = Contracts.objects if request.GET['location'] == 'c' else Designer.objects
     object_manager = ContractCells.objects if request.GET['location'] == 'c' else Objects.objects
     class_id = int(request.GET['class_id'])
@@ -296,7 +292,6 @@ def promp_direct_link(request):
 @view_procedures.is_auth
 @view_procedures.if_error
 def promp_owner(request):
-    is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
     dictionary = Dictionary.objects.get(id=int(request.GET['class_id']))
     manager = Objects.objects if dictionary.default == 'table' else ContractCells.objects
     objects = manager.filter(parent_structure_id=dictionary.parent_id)

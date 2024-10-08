@@ -167,143 +167,24 @@ def update_draft_menu(request, branch, is_contract=False):
 # временные данные страницы объектов. стираются при переходе к другому классу
 # omtd - object manager temp data
 def update_omtd(request):
-    def fill_omdt():
-        class_id = int(request.GET['class_id'])
-        request.session['temp_object_manager'] = {}
-        request.session['temp_object_manager']['class_id'] = class_id
-        location = ''
-        request.session['temp_object_manager']['path'] = request.path
-        if request.path in ('/contract', '/contract-draft'):
-            location = 'contract'
-        elif request.path in ('/manage-object', '/table-draft'):
-            location = 'table'
-        elif request.path == '/path':
-            location = 'table' if request.GET['location'].lower() == 't' else 'contract'
-        elif request.path == '/dictionary':
-            location = 'dict'
-        elif request.path == '/roh':
-            location = 'contract' if request.GET['location'] == 'c' else 'table'
-            request.session['temp_object_manager']['path'] = '/contract' if location == 'contract' else '/manage-object'
-
-        # загрузим заголовки класса в сессию
-        class_manager = None; obj_manager = None
-        if location == 'contract':
-            class_manager = Contracts.objects
-            obj_manager = ContractCells.objects
-        elif location == 'table':
-            class_manager = Designer.objects
-            obj_manager = Objects.objects
-        elif request.path == '/tree':
-            class_manager = Designer.objects if request.GET['location'].lower() == 't' else Contracts.objects
-            obj_manager = Objects.objects if request.GET['location'].lower() == 't' else ContractCells.objects
-        elif location == 'dict':
-            class_manager = Dictionary.objects
-            obj_manager = DictObjects.objects
-        # загрузим в сессию заголовки класса
-        headers = class_manager.filter(parent_id=class_id).values()
-        if request.path == '/tree':
-            headers = headers.exclude(formula__in=('table', 'contract'))
-        exclude_names = ('parent_branch', 'business_rule', 'link_map', 'trigger', 'completion_condition')
-        # if location != 'dict':
-        headers = list(headers.exclude(name__in=exclude_names).order_by('priority', 'id'))
-        # Если есть тип данных константа - добавим информацию о детях
-        for h in headers:
-            convert_procedures.ficoitch(h)
-        request.session['temp_object_manager']['headers'] = list(headers)
-        if location == 'dict':
-            request.session['temp_object_manager']['current_class'] = class_manager.filter(id=class_id).values()[0]
-            return False
-        current_class = class_manager.filter(id=class_id).select_related('parent')
-        if current_class:
-            current_class = current_class[0]
-        else:
-            return False
-        request.session['temp_object_manager']['current_class'] = model_to_dict(current_class)
-        is_tree = False  #  Параметр, являющийся истинной для класса, привязанного к дереву (но не само дерево.
-        # Если работаем с деревом = False) если с объектом в дереве - True
-        if current_class.parent_id and current_class.parent.formula == 'tree':
-            is_tree = True
-        # Загрузим в сессию информацию о заголовках всех словарей, привязанных к данному классу.
-        headers_my_dicts = Dictionary.objects.filter(formula='dict', parent_id=class_id, default=location)
-        my_dicts = []
-        for hmd in headers_my_dicts:
-            dict = list(Dictionary.objects.filter(parent_id=hmd.id).values())
-            my_dicts.append({'id': hmd.id, 'name': hmd.name, 'children': dict})
-        request.session['temp_object_manager']['my_dicts'] = my_dicts
-        # Загрузим информацию о дереве
-        if request.path == '/tree' or is_tree:
-            if is_tree:
-                parent_id = current_class.parent_id
-            else:
-                parent_id = class_id
-            codes_no_parent = [c.code for c in obj_manager.filter(value__isnull=True, name__name='parent',
-                                                                  parent_structure_id=parent_id)]
-            children = obj_manager.filter(parent_structure_id=parent_id, name__name='parent',
-                                          value=OuterRef('code')).annotate(count=Func(F('id'), function='Count')).values('count')
-            root_tree = list(obj_manager.filter(parent_structure_id=parent_id, code__in=codes_no_parent,
-                                                 name__name='name').values('code', 'value')\
-                .annotate(count_child=Subquery(children)))
-            def make_branch(rt):
-                br = {'code': rt['code'], 'name': rt['value'], 'parent': None, 'opened': False}
-                if rt['count_child']:
-                    br['children'] = []
-                return br
-            request.session['temp_object_manager']['tree'] = list(map(lambda rt: make_branch(rt), root_tree))
-            # Получим свойства дерева
-
-            tree = request.session['temp_object_manager']['tree']
-            if is_tree:  # Если тип данных Объект
-                is_contract = True if location == 'contract' else False
-                tree_headers = list(class_manager.filter(parent_id=parent_id, is_visible=True).exclude(formula__in=('contract', 'table'))\
-                                    .exclude(name__in=('is_right_tree', 'name', 'parent')).values())[:4]
-                for th in headers:
-                    convert_procedures.ficoitch(th)
-                request.session['temp_object_manager']['tree_headers'] = tree_headers
-                child_class = current_class.id
-            else:  # для дерева получим свойства
-                is_contract = True if request.GET['location'].lower() == 'c' else False
-                tree_headers = request.session['temp_object_manager']['headers']
-                child_class = None
-            request.session['temp_object_manager']['tree'] = tree_funs\
-                .get_branch_props(tree, parent_id, tree_headers, request.user.id, is_contract, child_class=child_class)
-            if is_tree:
-                root = {'code': 0, 'name': current_class.parent.name, 'parent': None, 'opened': True,
-                        'children': request.session['temp_object_manager']['tree']}
-                request.session['temp_object_manager']['tree'] = (root, )
-        # Загрузим массивы для контрактов и справочников
-        if current_class.formula in ('table', 'contract'):
-            arrays = class_manager.filter(parent_id=current_class.id, formula='array')
-            if arrays:
-                list_arrays = []
-                for a in arrays:
-                    dict_array = {'id': a.id, 'name': a.name}
-                    headers = list(class_manager.filter(parent_id=a.id).exclude(formula='techpro').values())
-                    dict_array['headers'] = headers
-                    dict_array['vis_headers'] = []
-                    counter_header = 0
-                    for h in headers:
-                        if h['is_visible'] and h['name'] != 'Собственник':
-                            if counter_header > 3:
-                                break
-                            else:
-                                counter_header += 1
-                            dict_array['vis_headers'].append(h)
-
-                    list_arrays.append(dict_array)
-                request.session['temp_object_manager']['arrays'] = list_arrays
-        # загрузим техпроцессы (2.0) для контрактов и массивов
-        if current_class.formula in ('contract', 'array') and location == 'contract':
-            request.session['temp_object_manager']['tps'] = session_procedures.atic(current_class.id)
-
+    updated = False
+    class_id = int(request.GET['class_id'])
+    loc = request.GET['location'] if 'location' in request.GET else ''
     if not 'temp_object_manager' in request.session or not request.session['temp_object_manager']:
-        fill_omdt()
+        request.session['temp_object_manager'] = session_procedures.fill_tom(class_id, request.path,
+                                                                             loc, request.user.id)
+        updated = True
     elif 'class_id' in request.session['temp_object_manager']:
-
-        if request.session['temp_object_manager']['class_id'] != int(request.GET['class_id']):
-            fill_omdt()
+        if request.session['temp_object_manager']['class_id'] != class_id:
+            request.session['temp_object_manager'] = session_procedures.fill_tom(class_id, request.path,
+                                                                                 loc, request.user.id)
+            updated = True
         elif request.session['temp_object_manager']['path'] != request.path \
                 and request.path not in ('/roh', '/get-object-version'):
-            fill_omdt()
+            request.session['temp_object_manager'] = session_procedures.fill_tom(class_id, request.path,
+                                                                                 loc, request.user.id)
+            updated = True
+    return updated
 
 
 # обнулить временные данные. Вход - реквест. Выход Да/нет. Обнулено / нет

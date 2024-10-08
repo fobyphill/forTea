@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, FloatField, Max, F, DateTimeField, DateField
 from django.forms import model_to_dict
-
+from app.other.global_vars import is_mysql
 import app.functions.contract_funs
 from app.functions import database_funs, reg_funs, convert_procedures, api_procedures, convert_funs, common_funs, \
     contract_funs, interface_funs, interface_procedures, convert_funs2, task_funs
@@ -300,7 +300,7 @@ def remove_object(class_id, code, user_id, location='table', source=None, forced
     manager_class = Designer.objects
     object_manager = Objects.objects
     # данные регистрации
-    incoming = {'class_id': class_id}
+    incoming = {'class_id': class_id, 'code': code}
     if location == 'dict':
         manager_class = Dictionary.objects
         object_manager = DictObjects.objects
@@ -339,7 +339,7 @@ def remove_object(class_id, code, user_id, location='table', source=None, forced
         return 'Ошибка. Не найден объект класса ' + str(class_id) + ' с кодом ' + str(code)
 
     # для контрактов дополнительно проверим условие выполнения.
-    if current_class.formula == 'contract':
+    if current_class.formula == 'contract' and not forced:
         if not api_procedures.verify_cc(class_id, delete_object, user_id):
             return 'Ошибка. Контракт не может быть удален, т.к. не выполняется "Условие завершения"'
         # cc = list(Contracts.objects.filter(parent_id=class_id, name='completion_condition', system=True).values())[0]
@@ -837,7 +837,7 @@ def get_object(class_id, code, location='table'):
     if not obj:
         return 'Ошибка. Нет объекта с указанными параметрами'
     else:
-        obj = convert_funs.queyset_to_object(obj)[0]
+        obj = convert_funs.queryset_to_object(obj)[0]
         # Получим дату последнего обновления элемента
         obj['date_update'] = reg_funs.get_last_update(class_id, code, current_class.formula)
         # Получим значения дочерних массивов
@@ -857,7 +857,7 @@ def get_object(class_id, code, location='table'):
                                                                      value=str(code)).values('code').distinct()]
                     children = manager.filter(code__in=child_codes, parent_structure_id=a.id)
                     if children:
-                        obj['arrays'][a.id] = convert_funs.queyset_to_object(children)
+                        obj['arrays'][a.id] = convert_funs.queryset_to_object(children)
             # Получим дочерние словари
             dict_headers = Dictionary.objects.filter(formula='dict', parent_id=class_id)
             if dict_headers:
@@ -865,7 +865,7 @@ def get_object(class_id, code, location='table'):
                 for dh in dict_headers:
                     children = DictObjects.objects.filter(parent_structure_id=dh.id, parent_code=code)
                     if children:
-                        obj['dicts'][dh.id] = convert_funs.queyset_to_object(children)[0]
+                        obj['dicts'][dh.id] = convert_funs.queryset_to_object(children)[0]
         return obj
 
 
@@ -970,7 +970,8 @@ def get_object_list(class_id, *conditions,  **params):
     if result:
         # разбор условий
         dict_query_sign = {'gt': '>', 'lt': '<', 'ge': '>=', 'le': '<=', 'eq': '=', 'ne': '<>'}
-        begin_query = 'select id, code from (select id, code, value, JSON_UNQUOTE(JSON_EXTRACT(value, "$")) ' \
+        json_extract = 'JSON_UNQUOTE(JSON_EXTRACT(value, "$"))' if is_mysql else 'JSON_EXTRACT(value, "$")'
+        begin_query = 'select id, code from (select id, code, value, ' + json_extract + \
                            'AS val_str, Cast(JSON_EXTRACT(value, "$") as float) as val_float FROM ' + table_name \
                            + ' where parent_structure_id = ' + class_id + ' and '
         codes = []
@@ -1597,6 +1598,7 @@ def run_eval(user_id, eval):
     header = {'value': eval, 'id': 1, 'name': 'no_name'}
     convert_funs.deep_formula(header, (obj,), user_id, True)
     return obj[1]['value']
+
 
 # Удаляет объекты по списку или диапазону кодов. location = [t, c, d]
 # Опциональные параметры: first_code, last_code, list_codes

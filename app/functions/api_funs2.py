@@ -5,11 +5,11 @@ from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from requests import auth
 
-from app.functions import ajax_funs_2, session_funs, hist_funs, view_procedures, files_funs, reg_funs
+from app.functions import ajax_funs_2, session_funs, hist_funs, view_procedures, files_funs, reg_funs, object_funs
 from app.models import Designer, Objects, Contracts, ContractCells, RegistratorLog, Dictionary, TechProcess
 
 
-# location = [t, c, d, p]
+# location = [table, contract, dict, tp]
 def get_object_hist(class_id, code,  date_from, date_to=datetime.today(), **params):
     location = params['location'] if 'location' in params else 'contract'
     children = bool(params['children']) if 'children' in params else True
@@ -65,24 +65,9 @@ def get_object_hist(class_id, code,  date_from, date_to=datetime.today(), **para
             path_info = '/dictionary'
         else:
             path_info = '/contract' if location[0] == 'c' else '/manage-object'
-
-        class ReqUser:
-            id = 0
-        class Request:
-            GET = dict()
-            session = dict()
-            path = path_info
-            user = ReqUser()
-        sr = Request()  #sr - subrequest
-        sr.GET['class_id'] = class_id
-        sr.GET['code'] = code
-        sr.user.id = user_id
-        sr.GET['location'] = location
-        sr.GET['timestamp'] = datetime.strftime(date_from, '%Y-%m-%dT%H:%M:%S')
-        session_funs.update_omtd(sr)
-        tom = sr.session['temp_object_manager']
+        tom = object_funs.get_tom(class_id, user_id, location, path_info)
         # добавим в ТОМ в субконтракты техпроцессы (при наличии оных)
-        if tom['current_class']['formula'] == 'contract' and children:
+        if tom['current_class']['formula'] == 'contract' and children and 'arrays' in tom:
             sub_tps = TechProcess.objects.filter(parent_id__in=[a['id'] for a in tom['arrays']], formula='tp').values()
             if sub_tps:
                 for st in sub_tps:
@@ -95,11 +80,9 @@ def get_object_hist(class_id, code,  date_from, date_to=datetime.today(), **para
                         parent_array['tps'] = []
                     parent_array['tps'].append(st)
                 three_lines_hist = True
-
         timeline = [t['date_update'] for t in
-                    hist_funs.roh(class_id, code, location, date_from, date_to, tom, three_levels_hist=three_lines_hist,
-                                  children=children)['timeline']
-                    ]
+                    hist_funs.roh(class_id, code, location, date_from, date_to, tom,
+                                  three_levels_hist=three_lines_hist, children=children)['timeline']]
         if timeline:
             str_first_date = timeline.pop(0)
             first_date = datetime.strptime(str_first_date, '%Y-%m-%dT%H:%M:%S')

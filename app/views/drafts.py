@@ -210,6 +210,7 @@ def table_draft(request):
             # Мгновенное создание объекта
             @transaction.atomic
             def draft_in_obj(code, current_class):
+                aaa = 8
                 # Проверка системных параметров контракта
                 is_saved, message, message_class, code, transaction_id, timestamp = interface_funs\
                     .save_contract_object(request, code, current_class, headers, source='draft') if is_contract else\
@@ -251,6 +252,7 @@ def table_draft(request):
                                                         dict_obj['i_stage_' + dvvk] = dvvv
                                 my_request = convert_procedures.dict_to_post(dict_obj)
                                 my_request.user = request.user
+                                my_request.GET['class_id'] = array['id']
                                 tom = {'id': array['id']}
                                 if is_contract:
                                     tom['tps'] = session_procedures.atic(array['id'])

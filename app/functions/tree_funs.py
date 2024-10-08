@@ -122,7 +122,7 @@ def get_children_branches(code, class_id, is_contract=False):
 def get_branch_props(branch, class_id, headers, user_id, is_contract=False, **params):
     # Соберем свойства
     codes = [b['code'] for b in branch]
-    prop_header_ids = [h['id'] for h in headers if h['name'] not in ('name', 'parent', 'is_right_tree')]
+    prop_header_ids = [h['id'] for h in headers if h['name'] not in ('parent', 'is_right_tree')]
 
     object_manager = ContractCells.objects if is_contract else Objects.objects
     props_qs = object_manager.filter(parent_structure_id=class_id, name_id__in=prop_header_ids, code__in=codes)\
@@ -148,7 +148,6 @@ def get_branch_props(branch, class_id, headers, user_id, is_contract=False, **pa
             copyh = h.copy()
             copyh['is_visible'] = True
             hwp.append(copyh)
-    # hwp = [h for h in headers if h['name'] != 'parent']  #  hwp - headers without parent
     child_class = params['child_class'] if 'child_class' in params else None
     convert_funs.prepare_table_to_template(hwp, list_props, user_id, is_contract, child_class=child_class)
     # Вбросим их в ветку
@@ -209,7 +208,7 @@ def get_inheritors(code, class_id, is_contract=False):
     for o in objs:
         result_codes.append(o.code)
         result_codes += get_inheritors(o.code, class_id, is_contract)
-    return  result_codes
+    return result_codes
 
 
 # glwt - get level without tree

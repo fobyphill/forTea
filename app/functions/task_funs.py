@@ -165,7 +165,7 @@ def make_task4prop(user_id, data, handler, date_delay, **params):
     timestamp = params['timestamp'] if'timestamp' in params else datetime.today()
     parent_transact = params['parent_transact'] if'parent_transact' in params else None
     code = params['code'] if 'code' in params else database_funs.get_other_code('task')
-    transact_id = params['task_transact'] if 'task_transact' in params else reg_funs.get_transact_id('task', code)
+    transact_id = reg_funs.get_transact_id('task', code)
     if not 'code' in params:
         reg = {'json': {'code': code}}
         reg_funs.simple_reg(user_id, 17, timestamp, transact_id, parent_transact, **reg)

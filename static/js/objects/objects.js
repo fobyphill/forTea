@@ -154,9 +154,8 @@ function fill_object_form(is_contract=false, is_draft=false) {
     for (let i = 0; i < headers.length; i++) {
         let header = JSON.parse(headers[i].innerText)
         let is_delay
-        if (is_contract){
+        if (is_contract)
             is_delay = (header.delay) ? header.delay.delay : false
-        }
         else if  (json_object.type === 'table' || json_object.type === 'array')
             is_delay = header.delay
         if (is_draft)
@@ -232,6 +231,8 @@ function fill_object_form(is_contract=false, is_draft=false) {
             $('#chb_' + header.id).prop('checked', val)
             if (is_delay && delay)
                 $('#chb_' + header.id + '_delay').prop('checked', true)
+            else $('#chb_' + header.id + '_delay').prop('checked', false)
+
         }
         // добавим ссылки
         else if (header.formula === 'link'){
@@ -816,12 +817,12 @@ function fill_arrays(objects, array_id, is_draft=false){
                     else if (obj.type === 'link' && obj.data){
                         let url = (obj.data.type === 'contract') ? 'contract' : 'manage-object'
                         url += '?class_id=' + obj.data['parent_structure'] + '&object_code=' + obj.data.code
-                        let main_field = (obj.data.type === 'contract') ? 'Дата и время записи' : 'Наименование'
+                        let main_field = (obj.data.type === 'contract') ? 'system_data' : 'Наименование'
                         let link_label = ''
                         for (let keykey in obj.data){
                             if (typeof(obj.data[keykey]) === 'object'){
                                 if (obj.data[keykey].name === main_field){
-                                    link_label = obj.data[keykey].value
+                                    link_label = (obj.data.type === 'contract') ? obj.data[keykey].value.datetime_create : obj.data[keykey].value
                                     break
                                 }
                             }
@@ -1095,18 +1096,20 @@ function get_full_object(class_id, code, location){
             if ('error' in data)
                 $('#div_msg').html(data.error).addClass('text-red')
             else {
-                // для контрактов добавим поле "Условие выполенения"
-                if (Object.keys(json_object) && json_object.type === 'contract'){
-                    if ('completion_condition' in json_object){
-                        json_object = data
-                    }
-                    else{
-                        json_object = data
-                    }
-                }
-                else {
-                    json_object = data
-                }
+                json_object = data
+                // непонятно, для чего это вообще
+                // // для контрактов добавим поле "Условие выполенения"
+                // if (Object.keys(json_object) && json_object.type === 'contract'){
+                //     if ('completion_condition' in json_object){
+                //         json_object = data
+                //     }
+                //     else{
+                //         json_object = data
+                //     }
+                // }
+                // else {
+                //     json_object = data
+                // }
                 fill_object_form((location === 'c'))
                 set_array_delay(json_object)  // Покажем и заполним таймлайн планирования
             }

@@ -5,6 +5,7 @@ from app.functions import server_funs, api_funs
 from app.models import ErrorsLog, Objects
 from app.other import global_vars
 
+
 # Парсинг валют. Парсит курс евро и доллара по отношению к рублю. Результаты кладет в значения курсов, регистраторы и их истории
 def parse_valute():
     robot_dummy = 6

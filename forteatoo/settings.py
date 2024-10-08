@@ -24,10 +24,10 @@ with open('secret_key.txt') as f:
     file = [line for line in f]
     SECRET_KEY = file[0].strip()
     f.close()
-SECRET_KEY = 'django-insecure-2z$zru!9yu374r587xa@2iu+(#ikxu!6ncxhf4ebf@jw53l2zc'
+# SECRET_KEY = 'django-insecure-2z$zru!9yu374r587xa@2iu+(#ikxu!6ncxhf4ebf@jw53l2zc'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
@@ -81,12 +81,23 @@ WSGI_APPLICATION = 'forteatoo.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.0/ref/settings/#databases
 
+with open('login.txt') as f:
+    file = [line for line in f]
+    host = file[0].strip()
+    port = file[1].strip()
+    name = file[2].strip()
+    login = file[3].strip()
+    password = file[4].strip()
+
+
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': BASE_DIR / 'db_coach.sqlite3',
     }
 }
+
 
 
 # Password validation
@@ -110,7 +121,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'ru-ru'
 
 TIME_ZONE = 'Europe/Moscow'
 
@@ -120,13 +131,15 @@ USE_L10N = True
 
 USE_TZ = False
 
+USE_THOUSAND_SEPARATOR = True
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.0/howto/static-files/
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static-collect')
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, "static"),
+    os.path.join(BASE_DIR, 'static'),
     os.path.join(BASE_DIR, 'database_files_history')
 ]
 

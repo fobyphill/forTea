@@ -1,5 +1,8 @@
+import os
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
+from app.other.global_vars import root_folder
 
 from app.models import RegName, DataTypesList, ClassTypesList, MainPageAddress
 
@@ -83,3 +86,10 @@ def initialisation():
             list_objs.append(obj)
         ClassTypesList.objects.bulk_create(list_objs)
     return result
+
+
+
+def to_log(message):
+    log_path = os.path.join(root_folder, 'log.txt')
+    with open(log_path, "a") as myfile:
+        myfile.write('\n' + message)

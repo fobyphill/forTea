@@ -499,7 +499,7 @@ def vadefoppa(new_delay, timestamp, current_class, object_params, location):
 # delete_object - кверисет - объект
 def verify_cc(class_id, delete_object, user_id):
     cc = list(Contracts.objects.filter(parent_id=class_id, name='completion_condition', system=True).values())[0]
-    objs = convert_funs.queyset_to_object(delete_object)
+    objs = convert_funs.queryset_to_object(delete_object)
     if not contract_funs.do_business_rule(cc, objs[0], user_id):
         return False
     else:

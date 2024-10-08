@@ -1,5 +1,7 @@
-with open('pain_data.txt') as pd:
-    file = [line for line in pd]
-    proxy = file[0].strip()
-    token_dadata = file[1].strip()
-    secret_key_dadata = file[2].strip()
+import os
+from pathlib import Path
+from forteatoo.settings import DATABASES as dbses
+
+root_folder = Path(__file__).resolve().parent.parent.parent
+is_mysql = dbses['default']['ENGINE'] == 'django.db.backends.mysql'
+proxy = 'http://fishulika:Ciffiav1@proxy2.f-trade.ru:3128'
