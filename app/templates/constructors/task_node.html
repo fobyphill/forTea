@@ -1,0 +1,20 @@
+<li id="unit{{ task.id }}">
+    <div onclick="send_form_with_param('select_node', '{{ task.id }}')"
+            {% if task.id == my_unit.id %}class="table-active"{% endif %}>
+        {% if 'children' in task %}
+        {% if task.opened %}-{% else %}+{% endif %}
+        {% else %}&nbsp;{% endif %}
+        <img src="/static/img/pics/{% if task.kind == 'folder' and task.open %}folder_opened_50{% elif task.kind == 'folder' %}folder_closed_50{% else %}task_48{% endif %}.png" width="20px">
+        {{ task.name }}
+        <b>ID:</b>{{ task.id }}
+    </div>
+    {% if 'children' in task and task.opened %}
+        <ul class="{% if not task.opened %}tag-invis{% endif %}">
+            {% for ch in task.children %}
+                {% with task=ch %}
+                    {% include 'constructors/task_node.html' %}
+                {% endwith %}
+            {% endfor %}
+        </ul>
+    {% endif %}
+</li>

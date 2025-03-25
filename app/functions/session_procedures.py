@@ -2,7 +2,7 @@ from django.db.models import OuterRef, Func, Subquery, F
 from django.forms import model_to_dict
 
 from app.functions import convert_procedures, tree_funs
-from app.models import TechProcess, Contracts, ContractCells, Designer, Objects, Dictionary, DictObjects
+from app.models import TechProcess, Contracts, ContractCells, Designer, Objects, Dictionary, DictObjects, UserSets
 
 
 # atic = add_tps_in_contract
@@ -60,19 +60,24 @@ def fill_tom(class_id, path, loc, user_id, **params):
         class_manager = Dictionary.objects
         obj_manager = DictObjects.objects
     # загрузим в сессию заголовки класса
-    headers = class_manager.filter(parent_id=class_id).values()
+    all_headers = class_manager.filter(parent_id=class_id).values()
     if path == '/tree':
-        headers = headers.exclude(formula__in=('table', 'contract'))
-    exclude_names = ('parent_branch', 'business_rule', 'link_map', 'trigger', 'completion_condition')
-    # if location != 'dict':
-    headers = list(headers.exclude(name__in=exclude_names).order_by('priority', 'id'))
+        all_headers = all_headers.exclude(formula__in=('table', 'contract'))
+    headers = []; system_headers = []
+    for ah in all_headers:
+        if location != 'dict' and ah['system']:
+            system_headers.append(ah)
+        elif ah['formula'] != 'array':
+            headers.append(ah)
+    headers.sort(key=lambda x: x['priority'])
     # Если есть тип данных константа - добавим информацию о детях
     for h in headers:
         convert_procedures.ficoitch(h)
-    tom['headers'] = list(headers)
+    tom['headers'] = headers
     if location == 'dict':
         tom['current_class'] = class_manager.filter(id=class_id).values()[0]
-        return False
+        return tom
+    tom['system_headers'] = system_headers
     current_class = class_manager.filter(id=class_id).select_related('parent')
     if current_class:
         current_class = current_class[0]
@@ -121,11 +126,14 @@ def fill_tom(class_id, path, loc, user_id, **params):
                                 .exclude(name__in=('is_right_tree', 'parent')).values())
             for th in headers:
                 convert_procedures.ficoitch(th)
+            for th in tree_headers:
+                convert_procedures.ficoitch(th)
             tom['tree_headers'] = tree_headers
             child_class = current_class.id
         else:  # для дерева получим свойства
             is_contract = True if loc.lower() == 'c' else False
             tree_headers = tom['headers']
+
             child_class = None
         tom['tree'] = tree_funs.get_branch_props(tree, parent_id, tree_headers, user_id, is_contract,
                                                  child_class=child_class)
@@ -143,6 +151,10 @@ def fill_tom(class_id, path, loc, user_id, **params):
                 headers = list(class_manager.filter(parent_id=a.id).exclude(formula='techpro').values())
                 dict_array['headers'] = headers
                 dict_array['vis_headers'] = []
+                if location == 'contract':
+                    array_tps = list(TechProcess.objects.filter(parent_id=a.id).values())
+                    if array_tps:
+                        dict_array['tps'] = array_tps
                 counter_header = 0
                 for h in headers:
                     if h['is_visible'] and h['name'] != 'Собственник':
@@ -158,3 +170,11 @@ def fill_tom(class_id, path, loc, user_id, **params):
     if current_class.formula in ('contract', 'array') and location == 'contract':
         tom['tps'] = atic(current_class.id)
     return tom
+
+
+def retreive_pagination(user_id):
+    sets = UserSets.objects.filter(user_id=user_id)
+    if sets:
+        return sets[0].pagination
+    else:
+        return 10

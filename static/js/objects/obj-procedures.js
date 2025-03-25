@@ -11,6 +11,7 @@ function cfiff(header_id) {
     my_folder.append(my_file)
 }
 
+
 let dict_type_prefix = {'float': '#i_float_', 'string': '#ta_', 'link': '#i_link_', 'bool': '#chb_',
         'date': '#i_date_', 'datetime': '#i_datetime_', 'enum': '#s_enum_', 'const': '#s_alias_', 'file': '#i_file_'}
 

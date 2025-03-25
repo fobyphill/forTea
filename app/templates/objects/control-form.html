@@ -47,42 +47,7 @@
     {% for h in headers %}
         {% if h.name == 'system_data' %}
         {% elif h.formula == 'array' %}
-            <div style="margin: 0 0 -0.5rem 0.5rem; z-index: 5">
-                <span class="badge label-prop-name">
-                    <a target="_blank" href="{{ request.path }}?class_id={{ h.id }}&input_owner=" id="a_array_{{ h.id }}">
-                        {{ h.name }}
-                    </a>
-                </span>
-                <button class="badge label-prop-name" style="border: 0" data-toggle="modal" data-target="#myModal{{ h.id }}"
-                type="button">Редактировать</button>
-            </div>
-            {# модальное окно с табличной частью объекта #}
-            <div class="modal fade" id="myModal{{ h.id }}" tabindex="-1" role="dialog" aria-labelledby="myModalLabel"
-                 aria-hidden="true">
-                <div class="modal-dialog modal-xl">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
-                        </div>
-                        <div class="modal-body" style="padding: 0">
-                            <iframe id="iframe_{{ h.id }}" width="100%" height="600" scrolling="yes" loading="lazy"
-                                sandbox="allow-same-origin allow-modals allow-scripts allow-forms" frameborder="0"
-                            src="{{ request.path }}?class_id={{ h.id }}&input_owner=">
-                            </iframe>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-default" name="close-btn"
-                                onclick="change_timeline_interval(true)" data-dismiss="modal">Закрыть</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {# таблица массива #}
-            <div style="border: 1px solid #ced4da; border-radius: 0.25rem;" class="mb-3">
-                <div id="div_table_slave_{{ h.id }}">
-                    {% include 'objects/array-table.html' %}
-                </div>
-            </div>
+
         {% else %}
             {# Заголовок поля #}
             <div style="margin: 0 0 -0.5rem 1.2rem">
@@ -307,7 +272,7 @@
                                 <span class="tag-invis" id="s_filename_{{ h.id|stringformat:'d' }}"></span>
                             </div>
                             <button class="btn-outline-primary btn" id="b_show_file_{{ h.id|stringformat:'d' }}"
-                            title="расположение файла" onclick="show_file_location({{ h.id|stringformat:'d' }})"
+                            title="расположение файла" onclick="show_file_location({{ h.id|stringformat:'d' }}, {{ is_contract }})"
                                     type="button">c:</button>
                             <button class="btn-outline-primary btn" id="b_save_file_{{ h.id|stringformat:'d' }}"
                             onclick="send_form_with_param('b_save_file', {{ h.id|stringformat:'d' }})"
@@ -335,7 +300,6 @@
                             </div>
                         {% endif %}
                     </div>
-
                 {% else %}
                     <div class="position-relative w-100">
                         {% if h.delay and request.path == '/manage-object' or h.delay.delay and request.path == '/contract' %}
@@ -366,15 +330,53 @@
         {# Техпроцессы #}
         {% include 'contracts/manage_tps.html' %}
     {% endfor %}
+    {# массивы #}
+    {% for a in request.session.temp_object_manager.arrays %}
+        <div style="margin: 0 0 -0.5rem 0.5rem; z-index: 5">
+            <span class="badge label-prop-name">
+                <a target="_blank" href="{{ request.path }}?class_id={{ a.id }}&input_owner=" id="a_array_{{ a.id }}">
+                    {{ a.name }}
+                </a>
+            </span>
+            <button class="badge label-prop-name" style="border: 0" data-toggle="modal" data-target="#myModal{{ a.id }}"
+            type="button">Редактировать</button>
+        </div>
+        {# модальное окно с табличной частью объекта #}
+        <div class="modal fade" id="myModal{{ a.id }}" tabindex="-1" role="dialog" aria-labelledby="myModalLabel"
+             aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                    </div>
+                    <div class="modal-body" style="padding: 0">
+                        <iframe id="iframe_{{ a.id }}" width="100%" height="600" scrolling="yes" loading="lazy"
+                            sandbox="allow-same-origin allow-modals allow-scripts allow-forms" frameborder="0">
+{#                            src="{{ request.path }}?class_id={{ a.id }}&input_owner=">#}
+                        </iframe>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" name="close-btn"
+                            onclick="change_timeline_interval(true)" data-dismiss="modal">Закрыть</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {# таблица массива #}
+        <div style="border: 1px solid #ced4da; border-radius: 0.25rem;" class="mb-3">
+            <div id="div_table_slave_{{ a.id }}">
+                {% include 'objects/array-table.html' %}
+            </div>
+        </div>
+    {% endfor %}
 
     {# Словари #}
     {% include 'objects/dict-in-object.html' %}
     {# Кнопки управления #}
     {% if request.user.is_staff and is_contract == 'false' or is_contract == 'true' %}
         <div class="mb-3">
-            <button type="button" class="btn btn-primary" style="background-color: #195fb2;
-            border-color: #195fb2; min-width: 100px" onclick="new_obj()">
-                Новый</button>
+            <button type="button" class="btn btn-primary" style="background-color: #195fb2; border-color: #195fb2;
+            min-width: 100px" onclick="new_obj()" id="b_new">Новый</button>
             <button type="button" class="btn btn-primary" style="background-color: #195fb2; border-color: #195fb2;
             min-width: 100px" onclick="pack_search();send_form_with_param('b_save')" id="b_save">
                 Сохранить</button>

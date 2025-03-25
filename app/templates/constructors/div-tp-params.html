@@ -14,20 +14,208 @@
                 {# business rule #}
                 <tr class="row" style="cursor: pointer; ">
                     <td class="col-1 text-right" id="td_br_id">{{ system_props.business_rule.id }}</td>
-                    <td class="col-2 text-right" style="word-wrap: normal; padding: 0.75rem 0">Бизнес-правило</td>
-                    <td class="col"><textarea id="ta_br" class="text-red">опция в разработке</textarea></td>
+                    <td class="col-2 text-right" style="word-wrap: normal; padding: 0.75rem 0">Бизнес-правила</td>
+                    <td class="col">
+                        <button class="btn btn-outline-info" id="b_br_add" onclick="make_tp_br(this)">+</button>
+                        {% for br in system_props.business_rule.value %}
+                            <hr>
+                            <div class="input-group mb-1">
+                                <span class="input-group-text border-0 bg-transparent text-left">Стадии</span>
+                                <select class="form-control" size="{{ properties|length }}" multiple id="select_br_stages_{{ forloop.counter0 }}">
+                                    {% for p in properties %}
+                                        <option value="{{ p.id }}" {% if p.id in br.stages %}selected{% endif %}>{{ p.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="input-group mb-1">
+                                <span class="input-group-text border-0 bg-transparent text-left">Действия</span>
+                                <label class="form-control">
+                                    Delay
+                                    <input type="checkbox" id="chb_br_delay{{ forloop.counter0 }}" {% if 'd' in br.event_kind %}checked{% endif %}>
+                                </label>
+                                <label class="form-control">
+                                    Update
+                                    <input type="checkbox" id="chb_br_update{{ forloop.counter0 }}" {% if 'u' in br.event_kind %}checked{% endif %}>
+                                </label>
+                            </div>
+                            <div class="input-group mb-1">
+                                <span class="input-group-text border-0 bg-transparent text-left">Код</span>
+                                <div class="form-control" style="height: auto; padding: 0; border: 0">
+                                    <textarea name="ta_br_code" id="ta_br_code{{ forloop.counter0 }}">{{ br.code }}</textarea>
+                                </div>
+                            </div>
+                            <button class="btn btn-outline-danger mx-auto" onclick="delete_br(this)">Удалить</button>
+                        {% endfor %}
+                    </td>
                 </tr>
                 {# LinkMap #}
                 <tr class="row" style="cursor: pointer;">
                     <td class="col-1 text-right" id="td_lm_id">{{ system_props.link_map.id }}</td>
                     <td class="col-2 text-right" style="word-wrap: normal; padding: 0.75rem 0">ЛинкМап</td>
-                    <td class="col"><textarea id="ta_lm">опция в разработке</textarea></td>
+                    <td class="col">
+                        <button class="btn btn-outline-info" onclick="acilot(this)">+</button>
+                        {% for lm in system_props.link_map.value %}
+                            <div id="div_lm_{{ forloop.counter0 }}">
+                                <hr>
+{#                              ID контракта#}
+                                <div class="input-group mb-1">
+                                    <span class="input-group-text">ID контракта</span>
+                                    <span class="form-control" id="s_contract_id_{{ forloop.counter0 }}">{{ lm.class_id }}</span>
+                                    <button type="button" class="btn border-0 btn-outline-danger"
+                                            onclick="this.parentNode.parentNode.remove()">Удалить</button>
+                                </div>
+{#                                 Code#}
+                                <div class="input-group mb-1">
+                                    <span class="input-group-text">Код</span>
+                                    <div class="form-control p-0 h-auto border-0">
+                                        <textarea id="ta_code_{{ forloop.counter0 }}">{{ lm.code }}</textarea>
+                                    </div>
+                                </div>
+{#                                Стадии#}
+                                <div class="input-group mb-1">
+                                    <span class="input-group-text">Стадии</span>
+                                    <select class="form-control" id="select_stages_lm_{{ forloop.counter0 }}"
+                                            size="{{ properties|length }}" multiple>
+                                        {% for p in properties%}
+                                            <option value="{{ p.id }}"{% if p.id in lm.stages %} selected{% endif %}>{{ p.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+{#                                 Метод триггера#}
+                                <div class="input-group mb-1">
+                                    <span class="input-group-text">Метод триггера</span>
+                                    <span class="form-control text-bold">{{ lm.method_name }}</span>
+                                    <span class="tag-invis" id="s_method_{{ forloop.counter0 }}">{{ lm.method }}</span>
+                                </div>
+{#                                Действие#}
+                                <div class="input-group mb-1">
+                                    <span class="input-group-text">Действия</span>
+                                    <label class="form-control">Delay
+                                        <input type="checkbox" id="chb_lm_delay_{{ forloop.counter0 }}" {% if 'd' in lm.event_kind %}checked{% endif %}>
+                                    </label>
+                                    <label class="form-control">Update
+                                        <input type="checkbox" id="chb_lm_update_{{ forloop.counter0 }}" {% if 'u' in lm.event_kind %}checked{% endif %}>
+                                    </label>
+                                </div>
+{#                          Параметры редактирования объекта#}
+                            {% if lm.method != 'n' %}
+                                <div class="input-group mb-1">
+                                    <span class="input-group-text">Параметры редактирования объекта</span>
+                                    <button class="btn btn-outline-info" onclick="apitilm(this, {{ forloop.counter0 }},
+                                            'edit_', '{{ lm.method }}')">+</button>
+                                </div>
+                                <table class="table table-bordered border-0" id="table_tp_lm_param_edit_{{ forloop.counter0 }}">
+                                    <tr class="row">
+                                        <th class="col-1 text-right">ID</th>
+                                        <th class="col text-center">Значение</th>
+                                        {% if lm.method == 'wo' %}
+                                            <th class="col-2 text-center">Лимит</th>
+                                        {% else %}
+                                            <th class="col-1 text-center">Знак</th>
+                                        {% endif %}
+                                        <th class="col-1"></th>
+                                    </tr>
+                                    {% for p in lm.params %}
+                                        <tr class="row">
+                                            <td class="col-1 text-right"
+                                                id="td_param_id_{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}"
+                                            >{{ p.id }}</td>
+                                            <td class="col text-center">
+                                                <textarea class="form-control"
+                                                  id="ta_val_{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}"
+                                                >{{ p.value }}</textarea>
+                                            </td>
+                                        {% if lm.method == 'wo' %}
+                                            <td class="col-2 text-center">
+                                                <input class="form-control" type="number" value="{{ p.limit }}"
+                                                   id="i_limit_{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}">
+                                            </td>
+                                        {% else %}
+                                            <td class="col-1 text-center">
+                                                <select class="form-control p-0"
+                                                    id="select_sign_{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}">
+                                                    <option value="+" {% if p.sign == '+' %}selected{% endif %}>+</option>
+                                                    <option value="-" {% if p.sign == '-' %}selected{% endif %}>-</option>
+                                                    <option value="e" {% if p.sign == 'e' %}selected{% endif %}>e</option>
+                                                </select>
+                                            </td>
+                                        {% endif %}
+                                            <td class="col-1 text-center">
+                                                <button class="btn btn-outline-danger" onclick="this.parentNode.parentNode.remove()">X</button>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </table>
+                            {% endif %}
+{#                          Параметры создания объекта#}
+                            {% if lm.method == 'n' or lm.method == 'en' %}
+                                <div class="input-group mb-1">
+                                    <span class="input-group-text">Параметры создания объекта</span>
+                                    <button class="btn btn-outline-info" onclick="apitilm(this, {{ forloop.counter0 }}, 'new_',
+                                            '{{ lm.method }}')">+</button>
+                                </div>
+                                <table class="table table-bordered border-0" id="table_tp_lm_param_new_{{ forloop.counter0 }}">
+                                    <tr class="row">
+                                        <th class="col-1 text-right">ID</th>
+                                        <th class="col text-center">Значение</th>
+                                        <th class="col-1"></th>
+                                    </tr>
+                                    {% for p in lm.create_params %}
+                                        <tr class="row">
+                                            <td class="col-1 text-right"
+                                                id="td_create_param_id_{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}">{{ p.id }}</td>
+                                            <td class="col text-center">
+                                                <textarea class="form-control"
+                                                id="ta_create_val_{{ forloop.parentloop.counter0 }}_{{ forloop.counter0 }}"
+                                                >{{ p.value }}</textarea>
+                                            </td>
+                                            <td class="col-1 text-center">
+                                                <button class="btn btn-outline-danger" onclick="this.parentNode.parentNode.remove()">X</button>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </table>
+                            {% endif %}
+                            </div>
+                        {% endfor %}
+                    </td>
                 </tr>
                 {# Trigger #}
                 <tr class="row" style="cursor: pointer;">
                     <td class="col-1 text-right" id="td_tr_id">{{ system_props.trigger.id }}</td>
                     <td class="col-2 text-right" style="word-wrap: normal; padding: 0.75rem 0">Триггер</td>
-                    <td class="col"><textarea id="ta_tr">опция в разработке</textarea></td>
+                    <td class="col">
+                        <button class="btn btn-outline-info" id="b_tr_add" onclick="make_tp_br(this)">+</button>
+                        {% for tr in system_props.trigger.value %}
+                            <hr>
+                            <div class="input-group mb-1">
+                                <span class="input-group-text border-0 bg-transparent text-left">Стадии</span>
+                                <select class="form-control" size="{{ properties|length }}" multiple name="select_tr_stages_{{ forloop.counter0 }}">
+                                    {% for p in properties %}
+                                        <option value="{{ p.id }}" {% if p.id in tr.stages %}selected{% endif %}>{{ p.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="input-group mb-1">
+                                <span class="input-group-text border-0 bg-transparent text-left">Действия</span>
+                                <label class="form-control">
+                                    Delay
+                                    <input type="checkbox" id="chb_tr_delay_{{ forloop.counter0 }}" {% if 'd' in tr.event_kind %}checked{% endif %}>
+                                </label>
+                                <label class="form-control">
+                                    Update
+                                    <input type="checkbox" id="chb_tr_update_{{ forloop.counter0 }}" {% if 'u' in tr.event_kind %}checked{% endif %}>
+                                </label>
+                            </div>
+                            <div class="input-group mb-1">
+                                <span class="input-group-text border-0 bg-transparent text-left">Код</span>
+                                <div class="form-control" style="height: auto; padding: 0; border: 0">
+                                    <textarea name="ta_br_code" id="ta_tr_code_{{ forloop.counter0 }}">{{ tr.code }}</textarea>
+                                </div>
+                            </div>
+                            <button class="btn btn-outline-danger mx-auto" onclick="delete_br(this)">Удалить</button>
+                        {% endfor %}
+                    </td>
                 </tr>
             </tbody>
         </table>
@@ -47,6 +235,7 @@
                     <th class="col-2 text-center">Название</th>
                     <th class="col text-center">Ответственный</th>
                     <th class="col text-center">Потомки</th>
+                    <th class="col text-center">Видимый</th>
                 </tr>
             </thead>
             <tbody id="tp_body_stages">
@@ -85,6 +274,9 @@
                                 <button class="btn btn-outline-primary mx-4" onclick="ancsotp(this.id.slice(12))"
                                 id="b_new_child_{{ stage.id }}">+</button>
                             </div></div>
+                        </td>
+                        <td class="col text-center">
+                            <input type="checkbox" id="chb_visible_{{ stage.id }}" {% if stage.settings.visible %}checked{% endif %}>
                         </td>
                     </tr>
                 {% endfor %}

@@ -1,11 +1,16 @@
+import re
+import time
 from datetime import datetime, timedelta
+from functools import reduce
+from operator import or_
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Subquery, Q
+from django.db.models import Subquery, Q, Value, F, CharField
 from django.db.models.fields.json import KeyTextTransform
 
-from app.functions import convert_funs
-from app.models import RegistratorLog, ContractCells, TechProcess
+from app.functions import convert_funs, reg_funs
+from app.models import RegistratorLog, ContractCells, TechProcess, TechProcessObjects, DictObjects, Dictionary, \
+    Designer, Objects, Contracts
 
 
 # gov = get object version
@@ -13,11 +18,10 @@ def gov(class_id, code, location, timestamp, tom, user_id, **params):
     three_level_hist = bool(params['three_level_hist=False']) if 'three_level_hist=False' in params else False
     children = bool(params['children']) if 'children' in params else True
     timestamp += timedelta(seconds=1)
-    base_hist = RegistratorLog.objects.filter(json_class=class_id, json__code=code, date_update__lt=timestamp)
-    if location in ('table', 'contract'):
-        base_hist = base_hist.filter(json__location=location)
-    elif location == 'dict':
-        base_hist = base_hist.filter(json__type='dict')
+    base_hist = RegistratorLog.objects.filter(json_class=class_id, json__code=code)
+    base_hist = base_hist.filter(json__location=location, json__type=tom['current_class']['formula'])
+    base_hist_ppa = base_hist.filter(date_delay__isnull=False, date_delay__lte=timestamp, date_update__gt=timestamp)
+    base_hist = base_hist.filter(date_update__lt=timestamp)
 
     # Функция добавляет техпроцессы в объект
     def add_tps_to_obj(parent_obj, tps):
@@ -55,10 +59,9 @@ def gov(class_id, code, location, timestamp, tom, user_id, **params):
             if h['name'] == 'system_data' and location == 'contract':
                 create_sys_data = base_hist.filter(reg_name=13, json__name=h['id']).order_by('id')[:1]
                 if create_sys_data:
-                    sys_data_now = create_sys_data[0]
+                    val = create_sys_data[0].json['value']
                 else:
-                    return {}
-                val = sys_data_now.json['value']
+                    val = {}
                 delay = None
             else:
                 hist_prop = base_hist.filter(reg_name_id__in=(13, 15), json__name=h['id']).order_by('-date_update')[:1]
@@ -67,11 +70,15 @@ def gov(class_id, code, location, timestamp, tom, user_id, **params):
                 elif h['formula'] == 'bool':
                     val = False
                 else:
-                     val = None
+                    val = None
                 if 'delay' in h:
                     if type(h['delay']) is bool and h['delay'] or type(h['delay']) is dict and h['delay']['delay']:
                         hist_delay = base_hist.filter(reg_name_id=22, json__name=h['id']).order_by('-date_update', '-id')[:1]
-                        delay = hist_delay[0].json['delay'] if hist_delay else None
+                        delay = hist_delay[0].json['delay'] if hist_delay else []
+                        ppa = base_hist_ppa.filter(reg_name=22, json__name=h['id']).order_by('date_delay', 'id')
+                        for p in ppa:
+                            new_ppa = p.json['delay'][-1]
+                            delay.append(new_ppa)
                     else:
                         delay = None
                 else:
@@ -127,10 +134,12 @@ def gov(class_id, code, location, timestamp, tom, user_id, **params):
                     object[a['id']]['objects'].append(array_obj)
                     if three_level_hist and a['tps']:
                         add_tps_to_obj(array_obj, a['tps'])
+
     # Добавим список с техпроцессами
     if 'tps' in tom and tom['tps'] and children:
         add_tps_to_obj(object, tom['tps'])
     return object
+
 
 def roh(class_id, code, location, date_from, date_to, tom, **params):
     children = bool(params['children']) if 'children' in params else True
@@ -138,17 +147,24 @@ def roh(class_id, code, location, date_from, date_to, tom, **params):
 
     just_history = False  # Возвращает истину, если массив данных содержит только данные истории,
 
-    base_hist = RegistratorLog.objects.filter(reg_name_id__in=(13, 15, 22), json_class=class_id, json__code=code)
+    base_hist = RegistratorLog.objects.filter(reg_name_id__in=(13, 15, 22), json_class=class_id, json__code=code,
+                                              json__type=tom['current_class']['formula'])
     if location in ('table', 'contract'):
         base_hist = base_hist.filter(json__location=location)
-    elif location == 'dict':
-        base_hist = base_hist.filter(json__type='dict')
-    q_hist = list(base_hist.filter(date_update__lte=date_to, date_update__gte=date_from).select_related('user')\
+    q_hist = list(base_hist.filter(date_update__lte=date_to, date_update__gte=date_from, date_delay__isnull=True).select_related('user')\
                   .values('date_update', 'user__first_name', 'user__last_name').distinct())
-    if q_hist:
-        last_date_object = base_hist.order_by('-date_update')[:1]  # последняя запись в истории данного объекта
-        if last_date_object and last_date_object[0].date_update > date_to:
-            just_history = True
+    last_date_object = base_hist.order_by('-date_update')[:1]  # последняя запись в истории данного объекта
+    if last_date_object and last_date_object[0].date_update > date_to:
+        just_history = True
+    # добавим делэй ППА
+    q_ppa = list(base_hist.filter(date_delay__lte=date_to, date_delay__gte=date_from, date_delay__isnull=False).select_related('user')\
+                 .values('date_delay', 'user__first_name', 'user__last_name').distinct())
+    for qp in q_ppa:
+        new_rec = {'date_update': qp['date_delay'], 'user__first_name': qp['user__first_name'],
+                       'user__last_name': qp['user__last_name']}
+        if new_rec not in q_ppa:
+            q_hist.append(new_rec)
+
     # Создадим массив с данными словарей, принадлежащих к данному объекту
     last_date_dicts = []
     if location != 'dict' and children:
@@ -172,7 +188,6 @@ def roh(class_id, code, location, date_from, date_to, tom, **params):
                 break
 
     # Создадим список с подчиненными массивами
-    last_date_arrays = []
     if 'arrays' in tom and children:
         for a in tom['arrays']:
             owner = next(h for h in a['headers'] if h['name'] == 'Собственник')
@@ -206,7 +221,6 @@ def roh(class_id, code, location, date_from, date_to, tom, **params):
                     q_hist += [lhst for lhst in list_hist_sub_tps if not lhst in q_hist]
 
     # ДОбавим список с техпроцессами
-    last_date_tps = []
     if 'tps' in tom and tom['tps'] and children:
         for tp in tom['tps']:
             list_hist_tp_base = RegistratorLog.objects.filter(reg_name_id=15, json_class=tp['id'],
@@ -229,3 +243,161 @@ def roh(class_id, code, location, date_from, date_to, tom, **params):
     timeline.sort(key=lambda x: x['date_update'])
 
     return {'just_history': just_history, 'timeline': timeline}
+
+
+# чистит выбранный объект в указанный период, собирает последние изменения об объекте и помещает их в последний момент
+# времени периода - date_to. Можно указывать объекты типов - справочник, контракт, массив, дерево
+# loc = [t, c]
+def clean_object_hist(class_id, code, loc, date_from, date_to):
+    try:
+        class_manager = Contracts.objects if loc == 'c' else Designer.objects
+        current_class = class_manager.filter(id=class_id)
+        if current_class:
+            current_class = current_class[0]
+        else:
+            full_clean_hist(class_id, code, loc, date_from, date_to)
+            return False
+        headers = class_manager.filter(parent_id=class_id, system=False)
+        dict_location = {'t': 'table', 'c': 'contract'}
+        def do_cleaning(current_class, headers, db_loc):
+            if db_loc != 'p':
+                hist_del = RegistratorLog.objects.filter(json_class=current_class.id, json_income__code=code,
+                                                      json_income__location=dict_location[loc], reg_name_id=8,
+                                                      date_update__lte=date_to, json_income__type=current_class.formula).values('id')
+            else:
+                hist_del = None
+            copatrids  = []  # contract parent transact ids
+            tapatrids = []
+            list_regs = []
+            if not hist_del:
+                transact_id = reg_funs.get_transact_id(current_class.id, code, db_loc)
+                base_inc = {'class_id': current_class.id, 'location': dict_location[loc], 'code': code, 'type': current_class.formula}
+                query_set = ''
+                str_date_to = datetime.strftime(date_to, '%Y-%m-%dT%H:%M:%S')
+                header_counter = 1
+                # Собираем данные для запроса
+                for h in headers:
+                    query_set += f'''(select * from app_registratorlog where date_update <="{str_date_to}" and 
+                    json_class = {current_class.id} and reg_name_id in (13, 15) and json_extract(json, "$.code") = {code} 
+                    and json_extract(json, "$.name") = {h.id} order by date_update desc limit 1)'''
+                    if header_counter < len(headers):
+                        query_set += ' union '
+                    header_counter += 1
+                last_hist_object = RegistratorLog.objects.raw(query_set)
+                # Сохраним последнюю версию объекта
+                for h in headers:
+                    try:
+                        last_hist_val = next(lho for lho in last_hist_object if lho.json['name'] == h.id)
+                    except StopIteration:
+                        continue
+                    inc = base_inc.copy()
+                    inc['name'] = h.id
+                    outc = inc.copy()
+                    inc['value'] = last_hist_val.json_income['value'] if last_hist_val.reg_name_id == 15 else None
+                    outc['value'] = last_hist_val.json['value']
+                    reg = {'json': outc, 'json_income': inc}
+                    hist_rec = {'user_id': 1, 'reg_id': 15, 'timestamp': date_to, 'transact_id': transact_id, 'reg': reg}
+                    list_regs.append(hist_rec)
+                    if db_loc == 'p':
+                        if last_hist_val.parent_transact_id:
+                            if last_hist_val.parent_transact_id[:1] == 'c':
+                                copatrids.append(last_hist_val.parent_transact_id)
+                            elif last_hist_val.parent_transact_id[:4] == 'task':
+                                tapatrids.append(re.match(r'(task\d+)', last_hist_val.parent_transact_id)[1])
+            # Удалим изменения, имевшие место в заданый период
+            RegistratorLog.objects.filter(json_class=current_class.id, json__code=code, date_update__gte=date_from,
+                                          date_update__lte=date_to, json__location=dict_location[loc],
+                                          reg_name_id__in=[13, 15, 22], json__type=current_class.formula).delete()
+            if not hist_del:
+                reg_funs.paket_reg(list_regs)
+            # для тпсов найдем таски - stage
+            if db_loc == 'p':
+                task_hist_base = RegistratorLog.objects.filter(reg_name_id__in=(17, 18, 19, 20, 21), date_update__lte=date_to,
+                                                               date_update__gt=date_from)
+                if copatrids:
+                    transact_ids = task_hist_base.filter(parent_transact_id=copatrids).values('transact_id').distinct()
+                    tapatrids += [re.match(r'(task\d+)id', ti['transact_id'])[1] for ti in transact_ids]
+                    if tapatrids:
+                        tapatrids = list(set(tapatrids))
+                        query = reduce(or_, (Q(transact_id__startswith=t) for t in tapatrids))
+                        task_hist_base.filter(query).delete()
+
+        # Чистим объект
+        do_cleaning(current_class, headers, loc)
+        # Если у объекта есть словари
+        if current_class.formula in ('table', 'contract'):
+            my_dicts = Dictionary.objects.filter(parent_id=class_id, formula='dict', default=dict_location[loc])
+            for myd in my_dicts:
+                dict_headers = Dictionary.objects.filter(parent_id=myd.id)
+                do_cleaning(myd, dict_headers, 'd')
+        # Если у объекта есть техпроцессы
+        if loc == 'c' and current_class.formula in ('contract', 'array'):
+            my_tps = TechProcess.objects.filter(parent_id=class_id, formula='tp')
+            for myt in my_tps:
+                tp_headers = TechProcess.objects.filter(parent_id=myt.id, settings__system=False)
+                do_cleaning(myt, tp_headers, 'p')
+    except Exception as ex:
+        return str(ex)
+    else:
+        return True
+
+
+def get_all_objs(date_from, date_to, **params):
+    types = ['tree', 'array']
+    if 'loc' in params:
+        if params['loc'] == 'c':
+            types.append('contract')
+        else:
+            types.append('table')
+    else:
+        types += ['table', 'contract']
+
+    all_objs = RegistratorLog.objects.filter(date_update__gte=date_from, date_update__lte=date_to,
+                                             reg_name_id__in=[13, 15], json__type__in=types)
+    if 'loc' in params:
+        location = 'contract' if params['loc'] == 'c' else 'table'
+        all_objs = all_objs.filter(json__location=location)
+    if 'class_id' in params:
+        all_objs = all_objs.filter(json_class=params['class_id'])
+    all_objs = all_objs.annotate(code=F('json__code')).annotate(location=F('json__location')).values('json_class', 'code', 'location')\
+        .distinct().order_by('location', 'json_class', 'code')
+    return list(all_objs)
+
+
+# Удаление сведений об объекте, если был удален класс данного объекта
+def full_clean_hist(class_id, code, loc, date_from, date_to):
+    types = ['tree', 'array']
+    if loc == 'c':
+        types.append('contract')
+        location = 'contract'
+    else:
+        types.append('table')
+        location = 'table'
+    hist = RegistratorLog.objects.filter(date_update__gt=date_from, date_update__lte=date_to, json_class=class_id)
+    q_code = Q(json__code=code) | Q(json_income__code=code)
+    q_loc = Q(json__location=location) | Q(json_income__location=location)
+    q_types = Q(json__type__in=types) | Q(json_income__types__in=types)
+    hist = hist.filter(q_loc, q_code, q_types)
+    hist.delete()
+
+
+def clean_objects_wo_code(class_id, loc):
+    types = ['tree', 'array']
+    if loc == 'c':
+        types.append('contract')
+        location = 'contract'
+    else:
+        types.append('table')
+        location = 'table'
+    hist = RegistratorLog.objects.filter(json_class=class_id, reg_name__in=[13, 15])
+    hist_to_del = []
+    for h in hist:
+        if 'code' not in h.json:
+            hist_to_del.append(h.id)
+    RegistratorLog.objects.filter(id__in=hist_to_del).delete()
+
+
+
+
+
+

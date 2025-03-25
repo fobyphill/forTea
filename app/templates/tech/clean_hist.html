@@ -1,0 +1,53 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="{{ message_class }}">{{ message|linebreaks }}</div>
+    {% endif %}
+
+    <div class="card">
+        <form id="form" method="post">
+            {% csrf_token %}
+            <div class="card-body">
+                <h4><a href="/tests-template">История изменений</a></h4>
+                <div class="filter-block">
+                    <div class="my-inline-blocks">
+                        <span><b>Выберите период</b></span>
+                        <input type="datetime-local" step="1" name="i_date_in" class="form-control" value="{{ request.POST.i_date_in }}">
+                        <input type="datetime-local" step="1" name="i_date_out" class="form-control" value="{{ request.POST.i_date_out }}">
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>Выберите Объект</b></span>
+                        <input type="number" name="i_class" class="form-control" value="{{ request.POST.i_class }}" placeholder="укажите ID класса">
+                        <input type="number" name="i_code" class="form-control" value="{{ request.POST.i_code }}" placeholder="укажите код объекта">
+                        <select name="s_loc" class="form-control">
+                            <option value="c" {% if request.POST.s_loc == 'c' %}selected{% endif %}>Контракты</option>
+                            <option value="t" {% if request.POST.s_loc == 't' %}selected{% endif %}>Справочники</option>
+                        </select>
+                    </div>
+                    <input type="submit" value="чистить" class="btn-outline-primary btn" style="vertical-align: top"
+                    name="b_clean">
+                    <input type="submit" value="показать объекты" class="btn-outline-primary btn" style="vertical-align: top"
+                    name="b_show">
+                </div>
+                {{ table|safe }}
+            </div>
+        </form>
+    </div>
+{% endblock %}

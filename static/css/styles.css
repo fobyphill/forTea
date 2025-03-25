@@ -229,3 +229,7 @@ th.sorted[data-order="1"]::after {
 .popover-footer a:visited{
     color: white;
 }
+
+.tr-tps-info{
+    background-color: Lavender
+}

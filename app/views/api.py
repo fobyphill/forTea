@@ -5,7 +5,8 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from django.http import HttpResponse
 from django.contrib import auth
-from app.functions import api_funs, view_procedures, api_procedures, convert_procedures, interface_funs, api_funs2
+from app.functions import api_funs, view_procedures, api_procedures, convert_procedures, interface_funs, api_funs2, \
+    convert_funs
 
 
 @view_procedures.is_auth
@@ -86,6 +87,7 @@ def edit_object(request):
         return HttpResponse(result)
     else:
         return HttpResponse('Вы не авторизованы. Пожалуйста авторизуйтесь')
+
 
 # Получить объект. Три обязательных параметра: class_id, code, location = ['table', 'contract', 'dict', 'tp']
 @view_procedures.is_auth
@@ -270,7 +272,7 @@ def remove_class_param(request):
 @view_procedures.is_auth
 def remove_class(request):
     if not ('class_id' in request.GET and 'class_type' in request.GET):
-        return HttpResponse('Не переданы все обязательные параметры: class_type, param_id')
+        return HttpResponse('Не переданы все обязательные параметры: class_type, class_id')
     location = 't' if not 'location' in request.GET else request.GET['location']
     return HttpResponse(api_funs.remove_class(request.user.id, request.GET['class_id'], request.GET['class_type'], location))
 
@@ -301,7 +303,7 @@ def get_class_list(request):
 
 @view_procedures.is_auth
 def run_eval(request):
-    return HttpResponse(api_funs.run_eval(request.user.id, request.GET['eval']))
+    return HttpResponse(convert_funs.static_formula(request.GET['eval'], request.user.id))
 
 
 def login(request):
@@ -375,3 +377,17 @@ def get_object_hist(request):
     else:
         response_data = message
     return HttpResponse(json.dumps(response_data, ensure_ascii=False), content_type="application/json")
+
+
+@view_procedures.is_auth
+def make_task(request):
+    if not 'task_id' in request.GET or not request.GET['task_id']:
+        return HttpResponse('Ошибка. Не задан параметр task_id')
+    try:
+        task_id = int(request.GET['task_id'])
+    except ValueError:
+        return HttpResponse('Ошибка. Параметр "task_id" должен быть целым числом')
+    result = api_funs2.make_task(task_id, request.user.id)
+    return HttpResponse(result)
+
+

@@ -25,4 +25,5 @@ urlpatterns = [
     path('api/remove-object-list', api.remove_object_list, name='remove-object-list'),
     path('api/get-object-hist', api.get_object_hist, name='get-object-hist'),
     path('api/upload-file', api_funs2.upload_file, name='upload-file'),
-] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    path('api/make-task', api.make_task, name='make-task'),
+]

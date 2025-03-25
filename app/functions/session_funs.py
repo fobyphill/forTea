@@ -3,7 +3,7 @@ from django.forms import model_to_dict
 
 from app.functions import convert_funs, tree_funs, convert_procedures, session_procedures
 from app.models import Designer, Objects, Contracts, Dictionary, TableDrafts, ContractCells, ContractDrafts, Tasks, \
-    DictObjects, TechProcess, DataTypesList, ClassTypesList
+    DictObjects, TechProcess, DataTypesList, ClassTypesList, UserSets
 
 
 def update_class_tree(request, is_contract=False):
@@ -102,20 +102,21 @@ def update_class_menu(request, tree, branch, parent=None, is_contract=False, **p
     dict_icon = {'table': icon_table, 'folder': icon_folder, 'alias': icon_alias, 'array': array,
                  'dict': icon_dict, 'contract': icon_contract, 'tree': icon_tree}
     for b in branch:
-        if (b['formula'] == 'dict' and is_draft) or (b['formula'] == 'alias' and is_draft) or b['formula'] == 'tp':
+        if b['formula'] == 'dict' or b['formula'] == 'alias' and is_draft or b['formula'] == 'tp'\
+                or b['formula'] == 'array':
             continue
         dummies = ('folder',) if not is_draft else ('folder', 'tree')
         if b['formula'] in dummies:
             address = '#'
-        elif b['formula'] == 'dict':
-            parent_type = parent['formula']
-            address = 'dictionary?class_id=' + str(b['id']) + '&parent_id=' + str(b['parent_id']) + '&parent_type=' + parent_type
+        # elif b['formula'] == 'dict':
+        #     parent_type = parent['formula']
+        #     address = 'dictionary?class_id=' + str(b['id']) + '&parent_id=' + str(b['parent_id']) + '&parent_type=' + parent_type
         elif b['formula'] == 'tree':
             loc = 'c' if is_contract else 't'
             address = 'tree?class_id=' + str(b['id']) + '&location=' + loc
         else:   address = path + '?class_id=' + str(b['id'])
         true_children = True if 'children' in b and next((True for ch in b['children']
-                                                          if ch['formula'] != 'tp'), False) else False
+                                                          if ch['formula'] not in ('tp', 'dict', 'array')), False) else False
         class_name = 'dropdown-item'
         if true_children:
             class_name += ' submenu'
@@ -234,7 +235,8 @@ def crqd(request, is_contract=False):
 # контрольный пересчет количества заданий
 def check_quant_tasks(request):
     # active_tasks = Tasks.objects.filter(user_id=request.user.id, date_done__isnull=True).values('code').distinct().count()
-    tasks = Tasks.objects.filter(user_id=request.user.id).order_by('code')
+    tasks = list(Tasks.objects.filter(user_id=request.user.id).order_by('code'))
+    tasks += list(Tasks.objects.filter(kind__in=('prop', 'stage'), data__sender_id=request.user.id))
     active_tasks = 0
     all_tasks = 0
     active_code = 0
@@ -247,3 +249,6 @@ def check_quant_tasks(request):
             all_code = t.code
             all_tasks += 1
     request.session['tasks_quant'] = {'at': active_tasks, 'alt': all_tasks}
+
+
+

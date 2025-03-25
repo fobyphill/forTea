@@ -13,7 +13,7 @@ from datetime import datetime
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render, redirect
 from app.functions import view_procedures, session_funs, interface_funs, convert_funs, common_funs, draft_funs, \
-    api_funs, convert_procedures, interface_procedures, session_procedures, task_funs
+    api_funs, convert_procedures, interface_procedures, session_procedures, task_funs, convert_funs2
 from app.models import Designer, TableDrafts, Contracts, ContractDrafts, ContractCells, Objects
 from django.contrib.auth import get_user_model
 
@@ -64,6 +64,7 @@ def table_draft(request):
     except:
         return HttpResponse('не найден ' + class_type + ' с ID = ' + request.GET['class_id'])
     headers = request.session['temp_object_manager']['headers']
+    system_headers = request.session['temp_object_manager']['system_headers']
     code = int(request.POST['i_code']) if 'i_code' in request.POST and request.POST['i_code'] else None
     draft_id = int(request.POST['i_id']) if 'i_id' in request.POST and request.POST['i_id'] else None
 
@@ -213,7 +214,7 @@ def table_draft(request):
                 aaa = 8
                 # Проверка системных параметров контракта
                 is_saved, message, message_class, code, transaction_id, timestamp = interface_funs\
-                    .save_contract_object(request, code, current_class, headers, source='draft') if is_contract else\
+                    .save_contract_object(request, code, current_class, headers, system_headers, source='draft') if is_contract else\
                     interface_funs.save_object(request, class_id, code, current_class, headers, source='draft')
 
                 is_error = bool(message_class)
@@ -260,7 +261,7 @@ def table_draft(request):
                                 current_class = header_manager.get(id=array['id'])
                                 params = {'source': 'draft', 'parent_transact': transaction_id, 'timestamp': timestamp}
                                 array_saved, arr_msg, msg_cls, arr_code, trans_id, timestamp = interface_funs\
-                                .save_contract_object(my_request, da.data['code'], current_class, array['headers'],
+                                .save_contract_object(my_request, da.data['code'], current_class, array['headers'], [],
                                                       **params) if is_contract else\
                                 interface_funs.save_object(my_request, array['id'], da.data['code'], current_class,
                                                            array['headers'], **params)
@@ -390,6 +391,8 @@ def table_draft(request):
                         obj[k]['type'] = h['formula']
                 else:
                     obj[k] = v
+        # добавим массивы
+
         for la in list_arrays:
             obj[la['id']] = {'headers': la['headers']}
             i = 0

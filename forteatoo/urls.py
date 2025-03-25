@@ -36,7 +36,8 @@ urlpatterns = [
     path('login', common.login_view, name='login'),
     path('logout', common.logout, name='logout'),
     path('tests', tests.tests, name='tests'),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    path('tests-template', tests.tests_template, name='tests-template'),
+] + static(settings.MEDIA_URL, document_root=settings.STATIC_ROOT)
 
 handler404 = "app.views.tech.page_not_found"
 handler500 = "app.views.tech.error_500"

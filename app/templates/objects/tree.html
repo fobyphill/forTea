@@ -223,6 +223,7 @@
             {# скрытые поля #}
             <div class="tag-invis">
                 <div id="div_location">{{ db_loc }}</div>
+                <span id="s_arrays">[]</span>
                 {% for h in request.session.temp_object_manager.headers %}
                     <span id="header_info{{ h.id }}">{{ h|json_dumps }}</span>
                 {% endfor %}

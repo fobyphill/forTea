@@ -1,0 +1,169 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    </style>
+    <link href="{% static 'webdatarocks/webdatarocks.min.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/history.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="{{ message_class }}">{{ message|linebreaks }}</div>
+    {% endif %}
+
+    <div class="card">
+        <form id="form">
+            <div class="card-body">
+                <h4><a href="/arhiv">Архив</a></h4>
+                <div class="filter-block">
+                    <div class="my-inline-blocks">
+                        <span><b>Выберите период</b></span>
+                        <input type="datetime-local" name="i_date_in" class="date4delay" value="{{ request.GET.i_date_in }}">
+                        <input type="datetime-local" name="i_date_out" class="date4delay" value="{{ request.GEt.i_date_out }}">
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>ID регистратора</b></span>
+                        <input name="i_filter_reg" class="form-control" style="display: inline; width: 10rem"
+                           list="regs" value="{{ request.GET.i_filter_reg }}">
+                        <datalist id="regs">
+                            {% for r in request.session.temp_data.data.reg_names %}
+                                <option value="{{ r.id }}">{{ r.name }}</option>
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>ID класса</b></span>
+                        <input name="i_filter_class" id="i_filter_class" class="form-control" style="display: inline;
+                        width: 5rem" list="dl_classes"
+                               value="{{ request.GET.i_filter_class }}" list="dl_classes">
+                        <datalist id="dl_classes"></datalist>
+
+                    </div>
+                    <div class="my-inline-blocks">
+                        <label>Расположение</label>
+                        <select name="s_location" id="s_location" class="form-control"
+                                style="display: inline; width: 10rem" onchange="prompt_classes(); prompt_name()">
+                            <option value="all">Все</option>
+                            <option value="t" {% if request.GET.s_location == 't' %} selected {% endif %}>Справочники</option>
+                            <option value="c"{% if request.GET.s_location == 'c' %} selected {% endif %}>Контракты</option>
+                            <option value="z"{% if request.GET.s_location == 'z' %} selected {% endif %}>Задачи</option>
+                        </select>
+                    </div>
+                    <div class="my-inline-blocks">
+                        <label>Тип</label>
+                        <select name="s_type" id="s_type" class="form-control" style="display: inline; width: 10rem"
+                        onchange="prompt_classes(); prompt_name()">
+                            <option value="all">Все</option>
+                            {% for k, v in request.session.class_types.items %}
+                                <option value="{{ k }}"
+                                    {% if k == request.GET.s_type %}
+                                        selected
+                                    {% endif %}
+                                >{{ v }}</option>
+                            {% endfor %}
+                            <option value="task" {% if request.GET.s_type == 'task' %}selected{% endif %}>Задача</option>
+                        </select>
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>Код Объекта</b></span>
+                        <input name="i_filter_object" class="form-control" style="display: inline; width: 5rem"
+                               value="{{ request.GET.i_filter_object }}">
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>ID заголовка</b></span>
+                        <input name="i_header" id="i_header" class="form-control" style="display: inline; width: 5rem"
+                               value="{{ request.GET.i_header }}">
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>ID транзакции</b></span>
+                        <input name="i_transact" class="form-control" style="display: inline; width: 10rem"
+                        value="{{ request.GET.i_transact}}">
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>ID род. транзакции</b></span>
+                        <input name="i_parent_transact" class="form-control" style="display: inline; width: 10rem"
+                        value="{{ request.GET.i_parent_transact}}">
+                    </div>
+                    <div class="my-inline-blocks">
+                        <span><b>ID пользователя</b></span>
+                        <input name="i_user" class="form-control" style="display: inline; width: 5rem"
+                               value="{{ request.GET.i_user }}">
+                    </div>
+                    <input type="submit" value="фильтровать" class="btn-outline-primary btn"
+                        style="vertical-align: top">
+                </div>
+                <table id="data-table" class="table table-hover table-responsive-md table_sort" style="width:100%">
+                    <thead>
+                        <tr style="cursor: pointer;" class="row">
+                            <th class="col-0-7 text-right col_sort">ID</th>
+                            <th class="col-0-7 text-right col_sort" style="word-wrap: normal">Transact ID</th>
+                            <th class="col-0-7 text-right col_sort" style="word-wrap: normal">Parent transact</th>
+                            <th class="col-0-7 text-right col_sort">reg ID</th>
+                            <th class="col-1 col_sort">Имя регистратора</th>
+                            <th class="col-1 text-center col_sort">Обновлен</th>
+                            <th class="col-0-7 col_sort text-right">user ID</th>
+                            <th class="col-1 col_sort">Пользователь</th>
+                            <th class="col-0-7 col_sort">Класс</th>
+                            <th class="col-0-7 col_sort">Код</th>
+                            <th class="col-0-7 col_sort">Лок</th>
+                            <th class="col-0-7 col_sort">Тип</th>
+                            <th class="col-0-7 col_sort">header</th>
+                            <th class="col text-center">Значение</th>
+                        </tr>
+                    </thead>
+                <tbody>
+                        {% load l10n %}
+                        {% for item in paginator.items_pages %}
+                            <tr class="row">
+                                <td id="id{{ item.id|stringformat:'d' }}" class="col-0-7 text-right">  {# id #}
+                                    {{ item.id|stringformat:'d' }}</td>
+                                <td id="transact{{ item.id|stringformat:'d' }}" class="col-0-7 text-right"> {# transact #}
+                                    {{ item.transact_id }}</td>
+                                <td id="id{{ item.id|stringformat:'d' }}" class="col-0-7 text-right"> {# parent_transact #}
+                                    {% if item.parent_transact %}{{ item.parent_transact }}{% endif %}</td>
+                                <td id="reg_id{{ item.id|stringformat:'d' }}" class="col-0-7 text-center"> {# reg_id #}
+                                    {{ item.reg_id }}
+                                </td>
+                                <td id="reg_name{{ item.id|stringformat:'d' }}" class="col-1">  {# reg_dada #}
+                                    {{ item.reg_data }}
+                                </td>
+                                <td id="date_update{{ item.id|stringformat:'d' }}" class="col-1 text-center"> {# date_update #}
+                                    {% localize on %}
+                                        {{ item.date_update|date:"d.m.Y H:i:s" }}
+                                    {% endlocalize %}
+                                </td>
+                                <td id="user{{ item.id|stringformat:'d' }}" class="col-0-7 text-right"> {# user_id #}
+                                    {{ item.user_id }}
+                                </td>
+                                <td id="user_name{{ item.id|stringformat:'d' }}" class="col-1">{{ item.user_data }}</td>
+                                <td id="class{{ item.id|stringformat:'d' }}" class="col-0-7">{{ item.class_id }}</td>  {# class #}
+                                <td id="code{{ item.id|stringformat:'d' }}" class="col-0-7">{{ item.code|default:'' }}</td>  {# code #}
+                                <td id="loc{{ item.id|stringformat:'d' }}" class="col-0-7">{{ item.location }}</td>   {# loc #}
+                                <td id="type{{ item.id|stringformat:'d' }}" class="col-0-7">{{ item.type }}</td>   {# type #}
+                                <td id="header{{ item.id|stringformat:'d' }}" class="col-0-7">{{ item.header_id }}</td>  {# header #}
+                                <td id="data{{ item.id|stringformat:'d' }}" class="col">{{ item.data|linebreaks }}</td>  {# data #}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {#  Пагинация#}
+                {% include 'objects/pagination.html' %}
+            </div>
+            <div class="tag-invis">
+                <input id="page" name="page">
+            </div>
+        </form>
+    </div>
+{% endblock %}

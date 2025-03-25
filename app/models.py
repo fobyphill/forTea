@@ -2,6 +2,7 @@ from datetime import datetime
 from django.contrib import auth
 from django.db import models
 
+
 # Справочники
 class Designer(models.Model):
     name = models.CharField(max_length=100)
@@ -74,7 +75,7 @@ class Registrator(models.Model):
 
 
 class RegistratorLog(models.Model):
-    state = models.CharField(max_length=100, null=True)
+    date_delay = models.DateTimeField(null=True)
     fact = models.CharField(max_length=100, null=True)
     delay = models.JSONField(null=True)
     json = models.JSONField(null=True, )
@@ -86,7 +87,7 @@ class RegistratorLog(models.Model):
     delay_income = models.JSONField(null=True)
     json_income = models.JSONField(null=True)
     json_string_income = models.CharField(max_length=1000, null=True)  # поле на время разработки
-    date_update = models.DateTimeField()
+    date_update = models.DateTimeField(db_index=True)
     transact_id = models.CharField(max_length=25, null=True)
     parent_transact_id = models.CharField(max_length=25, null=True)
     json_class = models.IntegerField(null=True, db_index=True)
@@ -125,6 +126,13 @@ class TablesCodes(models.Model):
     transact_id = models.BigIntegerField(null=True)
 
 
+class ObjectsTransactIds(models.Model):
+    class_id = models.PositiveIntegerField()
+    location = models.CharField(max_length=10)
+    code = models.PositiveIntegerField()
+    last_transact_id = models.BigIntegerField()
+
+
 # Таблица "Черновики справочников"
 class TableDrafts(models.Model):
     data = models.JSONField(null=True)
@@ -154,6 +162,15 @@ class Tasks(models.Model):
     kind = models.CharField(max_length=10)
 
 
+class TaskClasses(models.Model):
+    name = models.CharField(max_length=50)
+    parent = models.ForeignKey('self', on_delete=models.DO_NOTHING, null=True)
+    kind = models.CharField(max_length=10)
+    br = models.JSONField(null=True)
+    lm = models.JSONField(null=True)
+    tr = models.JSONField(null=True)
+
+
 class OtherCodes(models.Model):
     name = models.CharField(max_length=50)
     code = models.PositiveIntegerField()
@@ -165,7 +182,7 @@ class TechProcess(models.Model):
     formula = models.CharField(max_length=50)
     parent_id = models.PositiveIntegerField(null=True)
     value = models.JSONField(null=True)
-    settings = models.JSONField(default={'system': False})
+    settings = models.JSONField(default={'system': False, 'visible': True})
 
 
 # Техпроцессы - объекты
@@ -189,7 +206,6 @@ class MainPageAddress(models.Model):
     address = models.CharField(max_length=50, null=True)
 
 
-
 # Типы данных
 class DataTypesList(models.Model):
     name = models.CharField(max_length=30)
@@ -200,3 +216,26 @@ class DataTypesList(models.Model):
 class ClassTypesList(models.Model):
     name = models.CharField(max_length=30)
     description = models.CharField(max_length=50)
+
+
+# Модели БД Архив
+class Arhiv(models.Model):
+    reg_id = models.IntegerField()
+    transact_id = models.CharField(max_length=25)
+    parent_transact = models.CharField(max_length=25, null=True)
+    date_update = models.DateTimeField()
+    class_id = models.IntegerField()
+    code = models.IntegerField(null=True)
+    location = models.CharField(max_length=1)
+    type = models.CharField(max_length=20)
+    header_id = models.IntegerField(null=True)
+    value_inc = models.JSONField(null=True)
+    value_outc = models.JSONField(null=True)
+    user_id = models.IntegerField()
+
+
+class UserSets(models.Model):
+    user = models.ForeignKey(auth.models.User, on_delete=models.DO_NOTHING)
+    pagination = models.IntegerField(default=10)
+    main_page = models.CharField(null=True, max_length=50)
+

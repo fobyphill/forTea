@@ -27,13 +27,14 @@ def retreive_branch_children(branch):
 
 
 # удалить звено из ветки
-def del_branch(branch, code):
+def del_branch(branch, val, **params):
+    param_name = params['param_name'] if 'param_name' in params else 'code'
     for b in branch:
-        if b['code'] == code:
+        if b[param_name] == val:
             branch.pop(branch.index(b))
             return True
         elif 'children' in b:
-            result = del_branch(b['children'], code)
+            result = del_branch(b['children'], val, param_name=param_name)
             if result:
                 if not b['children']:
                     del branch[branch.index(b)]['children']
@@ -90,12 +91,16 @@ def check_children_objects(branch, class_id, is_contract):
 
 # открыть всю ветку до узла
 # Опциональные параметры: open = True / False. По умолчанию True
+# parent_name - наименование родителя - parent_id или parent
+# code_or_id - параметр, по которому осуществляется поиск в дереве. По умолчанию - код
 def open_branch(branch, tree, **params):
     open = False if 'open' in params and not params['open'] else True
-    if branch['parent']:
-        parent_branch = find_branch(tree, 'code', branch['parent'])
+    parent_name = params['parent_name'] if 'parent_name' in params else 'parent'
+    code_or_id = params['code_or_id'] if 'code_or_id' in params else 'code'
+    if branch[parent_name]:
+        parent_branch = find_branch(tree, code_or_id, branch[parent_name])
         parent_branch['opened'] = open
-        open_branch(parent_branch, tree, open=open)
+        open_branch(parent_branch, tree, open=open, parent_name=parent_name, code_or_id=code_or_id)
 
 
 # возвращает список детей, но без свойств

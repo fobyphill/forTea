@@ -21,10 +21,10 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
             return True, header_param
     param_type = 'v'   # Зададим тип параметра - V - значение, d - отложенное, dd - дата отложенного
     if not (k in ('owner', 'parent', 'name') or len(k) > 6 and k[-5:] == 'delay' or len(k) > 11 and k[-10:] == 'delay_date'):
-            try:
-                k = int(k)
-            except ValueError:
-                return 'Ошибка. Некорректно указан параметр объекта - ' + k + '\n'
+        try:
+            k = int(k)
+        except ValueError:
+            return 'Ошибка. Некорректно указан параметр объекта - ' + k + '\n'
     header_param = None
     if type(k) is int:
         res, header_param = try_header(k)
@@ -57,6 +57,9 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
                 return 'Ошибка. Некорректно задан ID родительской ветки. У данного класса нет родительского дерева.'
         elif current_class.formula == 'tree':
             header_param = next(cp for cp in class_params if cp['name'] == 'parent')
+        else:
+            return 'Ошибка. Некорректно задан параметр "parent". Его можно указывать только для объектов класса "tree", ' \
+                   'либо для объектов классов "table", "contract", находящихся в подчинении дерева<be>'
     elif k.lower() == 'owner':
         if current_class.formula in ('dict', 'array'):
             try:
@@ -114,7 +117,8 @@ def data_type_validation(k, v, class_params, current_class, is_contract=False):
             except ValueError:
                 return 'Ошибка. Некорректное значение ссылки. ID параметра: ' + str(k) + '. Значение: ' + v + '\n'
         elif header_param['formula'] == 'bool':
-            if v.lower() not in ('true', 'false'):
+            type_v = type(v)
+            if type_v is str and v.lower() not in ('true', 'false') or type_v is int and v not in (1, 0) or type_v not in (bool, str):
                 return 'Ошибка. Некорректное значение логического параметра ' + str(k) + ' = ' + v + \
                        '.Укажите значение True или False' + '\n'
         elif header_param['formula'] == 'date':
@@ -444,8 +448,8 @@ def copafroc(request):
 
 
 # fc4c = full check for children
-def fc4c(class_id, code, location):
-    children = database_funs.check_children(class_id, code, location)
+def fc4c(current_class, code, location):
+    children = database_funs.check_children(current_class, code, location)
     if children:
         counter = 1
         str_objs = ''
@@ -494,13 +498,3 @@ def vadefoppa(new_delay, timestamp, current_class, object_params, location):
         new_delay['date_update'] = str_timestamp
         timestamp = new_ts
     return new_delay, timestamp
-
-
-# delete_object - кверисет - объект
-def verify_cc(class_id, delete_object, user_id):
-    cc = list(Contracts.objects.filter(parent_id=class_id, name='completion_condition', system=True).values())[0]
-    objs = convert_funs.queryset_to_object(delete_object)
-    if not contract_funs.do_business_rule(cc, objs[0], user_id):
-        return False
-    else:
-        return True

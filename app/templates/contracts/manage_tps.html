@@ -36,7 +36,7 @@
                                 <td class="col">
                                     <div class="input-group">
                                         <input type="number" class="form-control text-right obj-prop"
-                                               oninput="csot({{ s.id }}, {{ s.parent_id }})"
+                                               oninput="shvast(this, {{ s.id }}, {{ s.parent_id }})"
                                             id="i_stage_{{ s.id }}" name="i_stage_{{ s.id }}">
                                         <span class="{% if current_class %}form-control text-right bg-light{% else %}tag-invis{% endif %}"
                                         id="s_stage_{{ s.id }}_fact"></span>

@@ -3,11 +3,12 @@ import copy
 import os
 import re
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.forms import model_to_dict
 
 from app.functions import reg_funs, task_funs, contract_funs, interface_procedures, task_procedures, api_funs, \
-    interface_funs, files_funs
+    interface_funs, files_funs, convert_funs, convert_funs2, session_procedures, hist_funs
 from app.models import Tasks, ContractCells, Objects, Registrator, TechProcess, TechProcessObjects, Contracts, Designer, \
     ContractDrafts, TableDrafts
 
@@ -19,67 +20,83 @@ def run_delays(props=None):
     if not props:
         props = Tasks.objects.filter(kind='prop', date_done__isnull=False, date_delay__lte=datetime_now)\
             .order_by('date_delay', 'id')
-    if props:
-        for p in props:
-            obj_manager = ContractCells.objects if p.data['location'] == 'c' else Objects.objects
-            task_transact = reg_funs.get_transact_id('task', p.code)
-            obj_transact = reg_funs.get_transact_id(p.data['class_id'], p.data['code'], p.data['location'])
-            timestamp = p.date_done if p.date_delay < p.date_done else p.date_delay
-            obj = obj_manager.get(parent_structure_id=p.data['class_id'], code=p.data['code'], name_id=p.data['name_id'])
-            if obj.name.formula == 'float':
-                obj_new_val = p.data['delay'] + obj.value if obj.value else p.data['delay']
-            else:
-                obj_new_val = p.data['delay']
+    for p in props:
+        obj_manager = ContractCells.objects if p.data['location'] == 'c' else Objects.objects
+        # task_transact = reg_funs.get_transact_id('task', p.code)
+        obj_transact = reg_funs.get_transact_id(p.data['class_id'], p.data['code'], p.data['location'])
+        timestamp = p.date_done if p.date_delay < p.date_done else p.date_delay
+        obj = obj_manager.get(parent_structure_id=p.data['class_id'], code=p.data['code'], name_id=p.data['name_id'])
+        if obj.name.formula == 'float':
+            obj_new_val = p.data['delay'] + obj.value if obj.value else p.data['delay']
+        else:
+            obj_new_val = p.data['delay']
+        date_delay = datetime.datetime.strftime(p.date_delay, '%Y-%m-%dT%H:%M')
+        old_val = obj.value
+        old_delay = copy.deepcopy(obj.delay)
+        now_delay = {'approve': True, 'date_update': date_delay, 'value': p.data['delay']}
+        new_delay = [od for od in old_delay if od != now_delay]
+        obj.value = obj_new_val
+        obj.delay = new_delay
 
-            # для контрактов выполним системные функции - BR, LM, Tr
-            res = 'ok'
-            if p.data['location'] == 'c':
-                headers = list(Contracts.objects.filter(parent_id=p.data['class_id'])\
-                    .exclude(formula__in=('array', 'business_rule', 'link_map', 'trigger')).values())
-                dict_object = {'code': p.data['code'], 'parent_structure': p.data['class_id'], obj.name_id: obj_new_val}
-
-                if obj.parent_structure.formula == 'contract':
-                    res = contract_funs.dcsp(p.data['class_id'], p.data['code'], headers, p.data['sender_id'], dict_object,
-                                             {}, timestamp, obj_transact)
-
-            date_delay = datetime.datetime.strftime(p.date_delay, '%Y-%m-%dT%H:%M')
-            loc4hist = 'contract' if p.data['location'] == 'c' else 'table'
-            inc = {'class_id': p.data['class_id'], 'location': loc4hist, 'code': p.data['code'], 'type': obj.name.parent.formula,
-                   'name': p.data['name_id'], 'id': obj.id, 'value': obj.value}
+        # для контрактов выполним системные функции - BR, LM, Tr
+        res = 'ok'
+        if obj.parent_structure.formula == 'contract':
+                class_manager = Contracts.objects if p.data['location'] == 'c' else Designer.objects
+                current_class = class_manager.get(id=p.data['class_id'])
+                all_params = list(Contracts.objects.filter(parent_id=p.data['class_id']).exclude(formula='array').values())
+                headers = []
+                system_params = []
+                for ap in all_params:
+                    if ap['system']:
+                        system_params.append(ap)
+                    else:
+                        headers.append(ap)
+                edit_obj = {'new_obj': obj, 'old_delay': old_delay, 'old_value': old_val}
+                object_user = get_user_model().objects.get(id=p.data['sender_id'])
+                try:
+                    edit_objs = [edit_obj]
+                    contract_funs.edit_contract(current_class, p.data['code'], headers, system_params, [], edit_objs,
+                                                [], object_user, timestamp, transact_id=obj_transact)
+                except Exception as ex:
+                    res = str(ex)
+        else:
+            location = 'contract' if p.data['location'] == 'c' else 'table'
+            inc = {'class_id': p.data['class_id'], 'location': location, 'type': obj.parent_structure.formula,
+                   'code': p.data['code'], 'name': p.data['name_id']}
+            outc = inc.copy()
             inc_delay = inc.copy()
-            inc_delay['delay'] = obj.delay.copy()
-            del inc_delay['value']
-            if res == 'ok':
-                obj.value = obj_new_val
-                outc = inc.copy()
-                outc['value'] = obj.value
-                reg = {'json': outc, 'json_income': inc}
-                reg_funs.simple_reg(p.data['sender_id'], 15, timestamp, obj_transact, task_transact, **reg)
-                # Изменим первые стадии всех подчиненных ТПсов
-                if 'cf' in p.data and p.data['cf']:
-                    tps = TechProcess.objects.filter(formula='tp', parent_id=p.data['class_id'], value__control_field=p.data['name_id'])
-                    for t in tps:
-                        header_stage_0 = TechProcess.objects.filter(parent_id=t.id).exclude(settings__system=True)[0]
-                        stage_0 = TechProcessObjects.objects.filter(parent_structure_id=t.id, name_id=header_stage_0.id,
-                                                                    parent_code=p.data['code'])[0]
-                        inc = {'class_id': t.id, 'location': 'contract', 'type': 'tp', 'id': stage_0.id,
-                               'name': header_stage_0.id, 'value': copy.deepcopy(stage_0.value)}
-                        outc = inc.copy()
-                        stage_0.value['fact'] += p.data['delay']
-                        stage_0.save()
-                        outc['value'] = stage_0.value
-                        reg = {'json': outc, 'json_income': inc}
-                        reg_funs.simple_reg(p.data['sender_id'], 15, timestamp, obj_transact, task_transact, **reg)
-            else:
-                p.data['error'] = res
-            obj.delay = [od for od in obj.delay if od['date_update'] != date_delay or od['value'] != p.data['delay']]
+            outc_delay = inc.copy()
+            inc['value'] = old_val
+            outc['value'] = obj_new_val
+            reg = {'json': outc, 'json_income': inc}
+            reg_funs.simple_reg(p.data['sender_id'], 15, timestamp, obj_transact, **reg)
+            inc_delay['delay'] = old_delay
+            outc_delay['delay'] = new_delay
+            reg = {'json': outc_delay, 'json_income': inc_delay}
+            reg_funs.simple_reg(p.data['sender_id'], 22, timestamp, obj_transact, **reg)
             obj.save()
-            outc_delay = inc_delay.copy()
-            outc_delay['delay'] = obj.delay
-            reg_delay = {'json': outc_delay, 'json_income': inc_delay}
-            reg_funs.simple_reg(p.data['sender_id'], 22, timestamp, obj_transact, task_transact, **reg_delay)
-            task_funs.delete_simple_task(p, timestamp, task_transact=task_transact)
-        upd_to_log(datetime_now)
+
+        if res == 'ok':
+            # Изменим первые стадии всех подчиненных ТПсов
+            if 'cf' in p.data and p.data['cf']:
+                tps = TechProcess.objects.filter(formula='tp', parent_id=p.data['class_id'], value__control_field=p.data['name_id'])
+                for t in tps:
+                    header_stage_0 = TechProcess.objects.filter(parent_id=t.id).exclude(settings__system=True)[0]
+                    stage_0 = TechProcessObjects.objects.filter(parent_structure_id=t.id, name_id=header_stage_0.id,
+                                                                parent_code=p.data['code'])[0]
+                    inc = {'class_id': t.id, 'location': 'contract', 'type': 'tp', 'id': stage_0.id,
+                           'name': header_stage_0.id, 'value': copy.deepcopy(stage_0.value)}
+                    outc = inc.copy()
+                    stage_0.value['fact'] += p.data['delay']
+                    stage_0.save()
+                    outc['value'] = stage_0.value
+                    reg = {'json': outc, 'json_income': inc}
+                    reg_funs.simple_reg(p.data['sender_id'], 15, timestamp, obj_transact, **reg)
+            p.delete()
+        else:
+            p.data['error'] = res
+            task_funs.delete_simple_task(p, timestamp, 1)
+
     # Запустим отложенные объекты
     delay_object_tasks = Tasks.objects.filter(kind='do', date_delay__lte=datetime_now)
     for dot in delay_object_tasks:
@@ -247,15 +264,51 @@ def run_delays(props=None):
         reg = {'json_income': {'code': obj['code']}}
         reg_funs.simple_reg(obj['user'], 21, timestamp, task_transact, **reg)
         dot.delete()
+    # Запустим кастомные таски
+    customs = Tasks.objects.filter(kind='custom')
+    for c in customs:
+        task_transact = reg_funs.get_transact_id(c.data['class_id'], c.code, 'z')
+        try:
+            result = task_funs.do_custom_task(copy.deepcopy(c), timestamp=datetime_now, parent_transact=task_transact)
+        except Exception as ex:
+            result = True
+        if result:
+            task_funs.delete_simple_task(c, datetime_now, 1, task_transact=task_transact)
+
+
+def run_clean_hist(date_from, date_to):
+    time_start = datetime.datetime.today()
+    result = ''
+    try:
+        list_objs = hist_funs.get_all_objs(date_from, date_to)
+        for lo in list_objs:
+            hist_funs.clean_object_hist(lo['json_class'], lo['code'], lo['location'][0], date_from, date_to)
+        time_end = datetime.datetime.today()
+        time_delta = time_end - time_start
+    except Exception as ex:
+        result = 'Ошибка' + str(ex)
+        time_delta = None
+    else:
+        date_from = date_from.strftime('%d.%m.%Y %H:%M:%S')
+        date_to = date_to.strftime('%d.%m.%Y %H:%M:%S')
+        result = f'ok. Очищена история в ' + str(len(list_objs)) + f' объектах. а период с {date_from} по {date_to}. '
+
+    format_timedelta = ''
+    if time_delta.days:
+        format_timedelta = '%d дней '
+    format_timedelta += '%H:%M:%S'
+    str_run_time = (datetime.datetime(1, 1, 1) + time_delta).strftime(format_timedelta)
+    result += f'Время выполнения операции - {str_run_time} \n'
+    with open(os.path.join(root_folder, 'log.txt'), "a") as myfile:
+        myfile.write(result)
+
 
 # тестовый апдейт
-def test_upd():
-    today = datetime.datetime.today()
-    # Registrator(user_id=4, reg_name_id=14, date_update=today).save()
-    upd_to_log(today)
+def test_upd(a):
+    print(a)
 
 
-def upd_to_log(today):
+def upd_to_log(text, today):
     log_path = os.path.join(root_folder, 'log.txt')
     with open(log_path, "a") as myfile:
-        myfile.write("Запись в БД " + datetime.datetime.strftime(today, '%d.%m.%Y %H:%M:%S') + '\n')
+        myfile.write(text + ' ' + datetime.datetime.strftime(today, '%d.%m.%Y %H:%M:%S') + '\n')

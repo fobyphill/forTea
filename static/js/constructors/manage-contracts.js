@@ -1,3 +1,4 @@
+
 function show_hide_branch(this_li) {
     let child = this_li.nextSibling.nextSibling
     if (child && child.tagName === 'UL'){
@@ -595,7 +596,9 @@ function save_fields() {
                 }
             }
             // Делэй
-            let delay = {'delay': $('#delay' + id).prop('checked'), 'handler': null}
+            let delay_val = $('#delay' + id)
+            delay_val = (delay_val.length) ? delay_val.prop('checked') : false
+            let delay = {'delay': delay_val, 'handler': null}
             let handler_user = $('#i_handler_' + id)
             let handler_eval = $('#ta_handler_' + id)
             if (handler_user.length){
@@ -612,7 +615,7 @@ function save_fields() {
             dict.visible = $('#visible' + id).prop('checked')
             dict.type = 'contract'
             dict.default = null
-            dict.delay = {'delay': null, 'handler': null}
+            dict.delay = {'delay': false, 'handler': null}
         }
         array.push(dict)
     })
@@ -794,11 +797,10 @@ function fill_system_contract_params() {
         if (param.name === 'link_map'){
             if (parent_td)
                 parent_td.append(container_tag)
-            let link_map = param.value
-
-    // рисуем дизайн
+            my_linkmap = param.value
+           // рисуем дизайн
             container_tag.innerHTML = '<button class="btn btn-outline-info" onclick="acilm(\'new\')" id="b_acilm">+</button>'
-            acilm(link_map)
+            acilm(my_linkmap)
         }
         else{
             container_tag.value = param.value
@@ -822,9 +824,165 @@ function save_system_fields() {
 
 function save_tp(){
     let dict_tp = {}
-    dict_tp.business_rule = $('#ta_br').val()
-    dict_tp.link_map = $('#ta_lm').val()
-    dict_tp.trigger = $('#ta_tr').val()
+    let br = []
+    let select_br_stages = $('select[id^="select_br_stages_"]')
+    // существующие БР
+    for (let i = 0; i < select_br_stages.length; i++){
+        let br_index = select_br_stages[i].id.slice(17)
+        let stages = []
+        for (let j = 0; j < select_br_stages[i].children.length; j++){
+            if (select_br_stages[i].children[j].selected)
+                stages.push(parseInt(select_br_stages[i].children[j].value))
+        }
+        let event_kind = []
+        if ($('#chb_br_delay' + br_index).prop('checked'))
+            event_kind.push('d')
+        if ($('#chb_br_update' + br_index).prop('checked'))
+            event_kind.push('u')
+        br.push({'stages': stages, 'code': $('#ta_br_code' + br_index).val(), 'event_kind': event_kind})
+    }
+    // новый БР
+    let new_br_stages = $('#select_stages_new_br4tp')
+    if (new_br_stages.length){
+        let new_stages = []
+        for (let i = 0; i < new_br_stages[0].length; i++){
+            if (new_br_stages[0][i].selected)
+                new_stages.push(parseInt(new_br_stages[0][i].value))
+        }
+        let event_kind = []
+        if ($('#chb_br_delay_new').prop('checked'))
+            event_kind.push('d')
+        if ($('#chb_br_update_new').prop('checked'))
+            event_kind.push('u')
+        br.push({'stages': new_stages, 'code': $('#ta_code_new_br4tp').val(), 'event_kind': event_kind })
+    }
+    dict_tp.business_rule = br
+    dict_tp.link_map = []
+    dict_tp.trigger = []
+
+    // linkMap
+    let contracts = $('span[id^="s_contract_id_"]')
+    for (let i = 0; i < contracts.length; i++){
+        let dict_lm = {'class_id': parseInt(contracts[i].innerText)}
+        let lm_index = contracts[i].id.slice(14)
+        dict_lm.code = $('#ta_code_' + lm_index).val()
+        dict_lm.method = $('#s_method_' + lm_index).text()
+        dict_lm.stages = $('#select_stages_lm_' + lm_index).val().map(Number)
+        dict_lm.event_kind = []
+        if ($('#chb_lm_delay_' + lm_index).prop('checked'))
+            dict_lm.event_kind.push('d')
+        if ($('#chb_lm_update_' + lm_index).prop('checked'))
+            dict_lm.event_kind.push('u')
+        if (['e', 'en', 'wo', 'pe'].includes(dict_lm.method)){
+            let params_edit = []
+            let param_ids = $('td[id^="td_param_id_' + i + '"]')
+            for (let j = 0; j < param_ids.length; j++){
+                let param_index = param_ids[j].id.match(/td_param_id_\d+_(\d+)/)[1]
+                let prefix = lm_index + '_' + param_index
+                let param_id = $("#td_param_id_" + prefix).text()
+                let dict_param = {'id': parseInt(param_id)}
+                dict_param.value = $('#ta_val_' + prefix).val()
+                if (dict_lm.method === 'wo')
+                    dict_param.limit = parseFloat($('#i_limit_' + prefix).val())
+                else dict_param.sign = $("#select_sign_" + prefix).val()
+                params_edit.push(dict_param)
+            }
+            // новый параметр
+            let new_param = $("#i_tp_lm_edit_id_" + lm_index)
+            if (new_param.length && new_param.val()){
+                let dict_param = {'id': parseInt(new_param.val()), 'value': $("#ta_tp_lm_edit_val_" + lm_index).val()}
+                if (dict_lm.method === 'wo')
+                    dict_param.limit = $('#i_tp_lm_limit_edit_' + lm_index).val()
+                else dict_param.sign = $("#select_tp_lm_sign_edit_" + lm_index).val()
+                params_edit.push(dict_param)
+            }
+            dict_lm.params = params_edit
+        }
+
+        if (['n', 'en'].includes(dict_lm.method)){
+            let params_create = []
+            let param_ids = $('td[id^="td_create_param_id_' + i + '"]')
+            for (let j = 0; j < param_ids.length; j++){
+                let param_index = param_ids[j].id.match(/td_create_param_id_\d+_(\d+)/)[1]
+                let prefix = String(i) + '_' + param_index
+                let param_id = $("#td_create_param_id_" + prefix).text()
+                let dict_param = {'id': parseInt(param_id)}
+                dict_param.value = $('#ta_create_val_' + prefix).val()
+                dict_param.sign = 'e'
+                params_create.push(dict_param)
+            }
+            // новый параметр
+            let new_param = $("#i_tp_lm_new_id_" + lm_index)
+            if (new_param.length)
+                params_create.push({'id': parseInt(new_param.val()), 'value': $("#ta_tp_lm_new_val_" + lm_index).val()})
+            dict_lm.create_params = params_create
+        }
+        dict_tp.link_map.push(dict_lm)
+    }
+    // новый линкмап
+    let new_lm_contract = $('#i_tp_lm_contract_id_new')
+    if (new_lm_contract.length && new_lm_contract.val()){
+        let event_kind = []
+        if ($("#chb_tp_lm_delay_new").prop('checked'))
+            event_kind.push('d')
+        if ($("#chb_tp_lm_update_new").prop('checked'))
+            event_kind.push('u')
+        let dict_new_lm = {'class_id': parseInt(new_lm_contract.val()), 'code': $('#ta_code_new').val(),
+                            'stages': $('#select_lm_stages_new').val().map(Number), 'method': $('#s_method_new').val(),
+                            'event_kind': event_kind}
+        let params = []
+        let new_header = $("#i_new_param_headernew")
+        if (new_header.length && new_header.val()){
+            let dict_param = {'id': parseInt(new_header.val()), 'value': $("#ta_new_param_codenew").val()}
+            if (new_lm_contract.method === 'wo')
+                dict_param.limit = parseFloat($("#i_new_limitnew").val())
+            else dict_param.sign = $("#s_new_signnew").val()
+            params.push(dict_param)
+        }
+        dict_new_lm.params = params
+
+        let new_header_create = $("#i_new_param_headernew_create")
+        if (new_header_create.length && new_header_create.val()){
+             dict_new_lm.create_params = [{'id': parseInt(new_header_create.val()), 'value': $("#ta_new_param_codenew_create").val()}]
+        }
+        dict_tp.link_map.push(dict_new_lm)
+    }
+
+    // новый триггер
+    let new_tr_stages = $('#select_stages_new_tr4tp')
+    if (new_tr_stages.length){
+        let new_stages = []
+        for (let i = 0; i < new_tr_stages[0].length; i++){
+            if (new_tr_stages[0][i].selected)
+                new_stages.push(parseInt(new_tr_stages[0][i].value))
+        }
+        let new_events = []
+        if ($('#chb_tr_delay_new').prop('checked'))
+            new_events.push('d')
+        if ($('#chb_tr_update_new').prop('checked'))
+            new_events.push('u')
+        let dict_new_tr = {'stages': new_stages, 'code': $('#ta_code_new_tr4tp').val(), 'event_kind': new_events}
+        dict_tp.trigger.push(dict_new_tr)
+    }
+
+    // существующие триггеры
+    let select_tr_stages = $('select[name^="select_tr_stages_"]')
+    for (let i = 0; i < select_tr_stages.length; i++){
+        let tr_index = select_tr_stages[i].name.slice(17)
+        let stages = []
+        for (let j = 0; j < select_tr_stages[i].children.length; j++){
+            if (select_tr_stages[i].children[j].selected)
+                stages.push(parseInt(select_tr_stages[i].children[j].value))
+        }
+        let event_kind = []
+        if ($('#chb_tr_delay_' + tr_index).prop('checked'))
+            event_kind.push('d')
+        if ($('#chb_tr_update_' + tr_index).prop('checked'))
+            event_kind.push('u')
+        dict_tp.trigger.push({'stages': stages, 'code': $('#ta_tr_code_' + tr_index).val(), 'event_kind': event_kind})
+    }
+
     result = JSON.stringify(dict_tp)
     send_form_with_param('save_sys_tp', result)
 }
+

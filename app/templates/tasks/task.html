@@ -1,4 +1,4 @@
-{% extends 'partials/../base/base.html' %}
+{% extends 'base/base.html' %}
 {% load static %}
 {% load my_filters %}
 {% block title %}
@@ -26,6 +26,7 @@
 {% endblock %}
 
 {% block extra_js %}
+    <script src="{% static 'js/tasks.js' %}"></script>
 {% endblock %}
 
 {% block content %}
@@ -84,59 +85,69 @@
                                 <td class="col-1 text-center">{{ t.parent_code }}</td>
                                 <td class="col-2 text-center">{{ t.kind }}</td>
                                 <td class="col">
-                                    <div class="">
-                                        {% for r in t.recs %}
-                                            <div class="row">
-                                                <div class="col" {% if r.date_done %}style="background-color: #e9ecef"{% endif %}>
-                                                    {{ r.data }}
-                                                </div>
-                                                {% if 's_address' not in request.POST or request.POST.s_address == 'to_me' %}
-                                                    <div class="col-0-5 text-center">
-                                                        <button style="border: 2px solid #dee2e6; border-radius: 5px; background-color: initial;"
-                                                            {% if r.date_done %}
-                                                                name="b_cancel_stage"
-                                                            {% else %}
-                                                                name="b_approve_stage"
-                                                            {% endif %}
-                                                                value="{{ r.id }}">
-                                                            <img {% if r.date_done %}
-                                                                    src="{% static 'img/cancel_36.png' %}" title="Отменить"
-                                                                 {% else %}
-                                                                     src="{% static 'img/green_tick.png' %}" title="Подтвердить"
-                                                                 {% endif %}
-                                                                    width="15rem" >
-                                                        </button>
-                                                    </div>
+                                    {% for r in t.recs %}
+                                        <div class="row">
+                                            <div class="col" {% if r.date_done %}style="background-color: #e9ecef"{% endif %}>
+                                                {{ r.data|safe }}
+                                                {% if t.kind == 'Стадия' %}
+                                                    <input class="form-control" id="i_stage_{{ r.id }}" value="{{ r.info.delta }}"
+                                                    oninput="change_stage({{ r.id }})" type="number" name="i_stage_{{ r.id }}">
                                                 {% endif %}
+                                                <span class="tag-invis" id="s_info_{{ r.id }}">{{ r.info|json_dumps }}</span>
+                                                <input class="tag-invis" id="i_partners_{{ r.id }}" name="i_partners_{{ r.id }}">
                                             </div>
-                                        {% endfor %}
-                                    </div>
+                                            {% if 's_address' not in request.POST or request.POST.s_address == 'to_me' %}
+                                                <div class="col-0-5 text-center">
+                                                    <button style="border: 2px solid #dee2e6; border-radius: 5px; background-color: initial;"
+                                                        {% if r.date_done %}
+                                                            name="b_cancel_stage"
+                                                        {% elif r.kind == 'cotc' %}
+                                                            name="b_cotc"
+                                                        {% else %}
+                                                            name="b_approve_stage"
+                                                        {% endif %}
+                                                            value="{{ r.id }}">
+                                                        <img {% if r.date_done %}
+                                                                src="{% static 'img/cancel_36.png' %}" title="Отменить"
+                                                             {% else %}
+                                                                 src="{% static 'img/green_tick.png' %}" title="Подтвердить"
+                                                             {% endif %}
+                                                                width="15rem" >
+                                                    </button>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
                                 </td>
-{#                                {% if status == 'actual' %}#}
                                 <td class="col-2 text-center">
-                                    {% if t.kind == 'Стадия' %}
-                                        <button class="btn btn-primary" style="background-color: #195fb2; border-color: #195fb2;" name="b_approve" type="submit"
-                                                value="{{ t.code }}">Выполнить</button>
-                                    {% endif %}
                                     <button class="btn btn-danger" name="b_cancel" value="{{ t.code }}">
                                         Отклонить</button>
                                 </td>
-{#                                {% elif status == 'cancel' %}#}
-{#                                    <td class="col-2">#}
-{#                                        <button class="btn btn-primary" style="background-color: #195fb2; border-color: #195fb2;"#}
-{#                                                name="b_active" type="submit"#}
-{#                                                value="{{ t.code }}">Активировать</button>#}
-{#                                        <button class="btn btn-danger" name="b_remove" value="{{ t.code }}">#}
-{#                                            Удалить</button>#}
-{#                                    </td>#}
-{#                                {% endif %}#}
+                            </tr>
+                        {% endfor %}
+                        {% for c in customs %}
+                            <tr class="row">
+                                <td class="col-1 text-center">{{ c.code }}</td>
+                                <td class="col-1 text-center">Задачи</td>
+                                <td class="col-1 text-center">{{ c.data.class_id }}</td>
+                                <td class="col-1 text-center"></td>
+                                <td class="col-2 text-center">custom</td>
+                                <td class="col">
+                                    <b>{{ c.class_name }}</b><br>
+                                    BR = {{ c.data.br }}<br>
+                                    LM = {{ c.data.lm }}<br>
+                                    Tr = {{ c.data.tr }}
+                                </td>
+                                <td class="col-2 text-center">
+                                    <button class="btn btn-danger" name="b_cancel_custom" value="{{ c.id }}">Отклонить</button>
+                                </td>
                             </tr>
                         {% endfor %}
                     </tbody>
                 </table>
                 {#  Пагинация#}
                 {% if tasks %}
-                    {% include 'partials/../objects/pagination.html' %}
+                    {% include 'objects/pagination.html' %}
                 {% endif %}
             </div>
         </form>
@@ -144,6 +155,26 @@
     {# Подсказки#}
     <div>
         <b>Подсказки:</b><br>
+    </div>
+    {# Универсальное модальное окно #}
+    <div class="modal fade" id="universal_modal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="l_universal_modal">Внимание!</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true" id="span_header"></span>
+            </button>
+          </div>
+          <div class="modal-body">
+              <div class="form-group" id="div_body_text"></div>
+          </div>
+          <div class="modal-footer" id="div_buttons">
+              <button type="button" class="btn btn-secondary" data-dismiss="modal" id="b_modal_cancel">Отмена</button>
+              <button type="button" class="btn btn-danger" id="b_modal_ok" data-dismiss="modal">OK</button>
+          </div>
+        </div>
+      </div>
     </div>
 
 {% endblock %}

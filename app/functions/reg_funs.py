@@ -24,6 +24,7 @@ def simple_reg(user_id, reg_id, timestamp, transact_id, parent_transact_id=None,
         if not 'delay' in reg:    reg['delay'] = None
         if not 'json_income' in reg: reg['json_income'] = None
         if not 'json' in reg: reg['json'] = None
+        if not 'date_delay' in reg:  reg['date_delay'] = None
 
         # Запись в истории
         log = RegistratorLog(reg_name_id=reg_id)
@@ -38,6 +39,7 @@ def simple_reg(user_id, reg_id, timestamp, transact_id, parent_transact_id=None,
         log.transact_id = transact_id
         log.parent_transact_id = parent_transact_id
         log.date_update = timestamp
+        log.date_delay = reg['date_delay']
         log.user_id = user_id
         class_id = None
         if reg['json'] and 'class_id' in reg['json']:
@@ -54,7 +56,7 @@ def simple_reg(user_id, reg_id, timestamp, transact_id, parent_transact_id=None,
         error.save()
         text_letter = error.name + '. Дата и время выполнения: ' + error.date_time_error.strftime('%d.%m.%Y %H:%M:%S')\
         + '. ID регистратора: ' + str(reg_id) + '. ID пользователя: ' + str(user_id)
-        server_funs.send_mail('shulika@shopft.ru', 'ошибка простого регистратора', text_letter)
+        server_funs.send_mail('pricepro@f-trade.ru', 'ошибка простого регистратора', text_letter)
         return False
 
 
@@ -81,7 +83,7 @@ def make_reg(reg_name, user_id):
 
 
 # Получить текущую ID транзации истории для конкретного кода конкретного класса
-# Вход: class_id, code, location = [t, c, d, p] - table, contract, dict, tp
+# Вход: class_id, code, location = [t, c, d, p, z] - table, contract, dict, tp, task(z)
 def get_transact_id(class_id, code, location='t'):
     if class_id == 'task':
         template_transact = class_id + str(code) + 'id'

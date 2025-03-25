@@ -76,7 +76,6 @@
   <div class="modal-dialog" role="document">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="exampleModalLabel">Внимание!</h5>
         <button type="button" class="close" data-dismiss="modal" aria-label="Close">
           <span aria-hidden="true" id="s_tp_modal_header"></span>
         </button>
@@ -85,8 +84,8 @@
           <div class="form-group" id="d_tp_modal_body"></div>
       </div>
       <div class="modal-footer" id="div_buttons">
-          <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
-          <button type="button" class="btn btn-danger" onclick="choice_parent()" id="b_tp_ok">OK</button>
+          <button type="button" class="btn btn-secondary" data-dismiss="modal" onclick="cancel_change_tp()">Отмена</button>
+          <button type="button" class="btn btn-danger" onclick="get_routs()" id="b_tp_ok">OK</button>
       </div>
     </div>
   </div>

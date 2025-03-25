@@ -13,7 +13,7 @@ from django.http import HttpResponse
 import app.functions.contract_funs
 import app.functions.interface_procedures
 from app.functions import view_procedures, interface_funs, convert_funs, session_funs, contract_funs, hist_funs, \
-    convert_procedures
+    convert_procedures, convert_funs2
 from app.models import TableDrafts, Designer, ContractDrafts, Contracts, ContractCells, Objects, TechProcess, \
     RegistratorLog, TechProcessObjects, DictObjects, Dictionary, MainPageConst
 from django.contrib.auth import get_user_model
@@ -126,10 +126,10 @@ def get_business_rule(request):
     class_id = int(request.GET['class_id'])
     if class_id == int(request.session['temp_object_manager']['class_id']):
         headers = request.session['temp_object_manager']['headers']
+        biz_rule = next(sh for sh in request.session['temp_object_manager']['system_headers'] if sh['name'] == 'business_rule')
     else:
-        excl_names = ('business_rule', 'link_map', 'trigger')
-        headers = Contracts.objects.filter(parent_id=class_id).exclude(name__in=excl_names).values()
-    biz_rule = Contracts.objects.filter(parent_id=class_id, name='business_rule').values()[0]
+        headers = Contracts.objects.filter(parent_id=class_id, system=False).values()
+        biz_rule = Contracts.objects.filter(parent_id=class_id, name='business_rule').values()[0]
     my_tps = request.session['temp_object_manager']['tps'] if 'tps' in request.session['temp_object_manager'] else None
     old_obj = ContractCells.objects.filter(parent_structure_id=class_id, code=code)
     presaved_object = app.functions.interface_procedures.mofr(code, class_id, headers, request.GET, old_obj, True, tps=my_tps)
@@ -201,8 +201,10 @@ def gfob(request):
     object = object_manager.filter(parent_structure_id=class_id, code=code)
     object = convert_funs.queryset_to_object(object)
     is_contract = True if request.GET['location'] == 'c' else False
-    formula_array_headers = [h for h in tom['headers'] if h['formula'] in ('array', 'eval')]
-    convert_funs.prepare_table_to_template(formula_array_headers, object, request.user.id, is_contract)
+    if 'arrays' in tom and tom['arrays']:
+        convert_funs2.aato(tom['arrays'], object[0], request.user.id)
+    formula_array_headers = [h for h in tom['headers'] if h['formula'] == 'eval']
+    convert_funs.prepare_table_to_template(formula_array_headers, object, request.user.id, is_contract, tps4arrays=True)
     if 'my_dicts' in tom and tom['my_dicts']:
         convert_funs.add_dicts(object, tom['my_dicts'])
     if 'tps' in tom:
@@ -258,18 +260,20 @@ def gaff(request):
 @view_procedures.is_auth
 @view_procedures.if_error_json
 def calc_user_formula(request):
-    list_params = json.loads(request.GET['list_params'])
-    const_id = int(request.GET['const_id'])
-    is_contract = (request.GET['is_contract'] == 'true')
+    list_params = json.loads(request.POST['list_params'])
+    const_id = int(request.POST['const_id'])
+    is_contract = (request.POST['is_contract'] == 'true')
     manager = Contracts.objects if is_contract else Designer.objects
     our_const = manager.get(id=const_id)
     our_const = model_to_dict(our_const)
     for lp in list_params:
-        our_const['value'] = re.sub(r'\[\[\s*\n*\s*user_data_' + lp['id'] + '[\w\W]*?\]\]', lp['value'],
-                                    our_const['value'], flags=re.M)
+        if type(lp['value']) is list:
+            lp['value'] = str(lp['value'])
+        our_const['value'] = re.sub(r'\[\[\s*\n*\s*user_data_' + lp['id'] + r'\D{1}.*?\]\]', lp['value'],
+                                    our_const['value'], flags=re.DOTALL)
         if lp['value'][:17] == "datetime.strptime":
             our_const['value'] = 'from datetime import datetime\n' + our_const['value']
-    code = int(request.GET['code']) if 'code' in request.GET else 0
+    code = int(request.POST['code']) if 'code' in request.POST else 0
     obj = {'parent_structure': our_const['parent'], 'code': code}
     convert_funs.deep_formula(our_const, (obj, ), request.user.id, is_contract)
     return HttpResponse(json.dumps(obj[our_const['id']]['value'], ensure_ascii=False), content_type="application/json")
@@ -286,7 +290,7 @@ def cmpf(request):
         result = ''
     else:
         for lp in list_params:
-            our_const['value'] = re.sub(r'\[\[\s*\n*\s*user_data_' + lp['id'] + '[\w\W]*?\]\]', lp['value'],
+            our_const['value'] = re.sub(r'\[\[\s*\n*\s*user_data_' + lp['id'] + '\D{1}[\w\W]*?\]\]', lp['value'],
                                         our_const['value'], flags=re.M)
         convert_funs.deep_formula(our_const, (our_const, ), request.user.id)
         result = our_const[our_const['id']]['value']
@@ -348,4 +352,43 @@ def draft_link(request):
         if object_filtred:
             result.append(dict_res)
     return HttpResponse(json.dumps(result, ensure_ascii=False), content_type="application/json")
+
+
+@view_procedures.is_auth
+def get_tps(request):
+    array_id = int(request.GET['array_id'])
+    array_codes = json.loads(request.GET['array_codes'])
+    my_tps = []
+    tps = TechProcess.objects.filter(parent_id=array_id)
+    timestamp = request.GET['timestamp'] if request.GET['timestamp'] == 'now' else\
+        datetime.strptime(request.GET['timestamp'], '%Y-%m-%dT%H:%M:%S') + timedelta(seconds=1)
+    for t in tps:
+        tp_objects = []
+        stages = list(TechProcess.objects.filter(parent_id=t.id, settings__system=False, settings__visible=True).values())
+        my_tp = {s['id']: s['name'] for s in stages}
+        my_tp['id'] = t.id
+        my_tp['name'] = t.name
+        for ac in array_codes:
+            tp_object = {'code': ac}
+            if request.GET['timestamp'] == 'now':
+                q_tp = TechProcessObjects.objects.filter(parent_structure_id=t.id, parent_code=ac)
+                for q in q_tp:
+                    val = q.value['fact'] + sum(d['value'] for d in q.value['delay'])
+                    tp_object[q.name_id] = val
+            else:
+                tp_object = {'code': ac}
+                for s in stages:
+                    hist = RegistratorLog.objects.filter(json__type='tp', reg_name__in=(13, 15), json__name=s['id'],
+                                                         json_class=t.id, json__code=ac,
+                                                         date_update__lte=timestamp).order_by('-date_update')[:1]
+                    if hist:
+                        value = hist[0].json['value']
+                        val = value['fact'] + sum(d['value'] for d in value['delay'])
+                    else:
+                        val = 0
+                    tp_object[s['id']] = val
+            tp_objects.append(tp_object)
+        my_tp['objects'] = tp_objects
+        my_tps.append(my_tp)
+    return HttpResponse(json.dumps(my_tps, ensure_ascii=False), content_type="application/json")
 

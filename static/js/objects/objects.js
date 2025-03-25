@@ -417,22 +417,6 @@ function fill_object_form(is_contract=false, is_draft=false) {
                 label_delay[0].parentElement.style.height = String(label[0].clientHeight) + 'px'
             }
         }
-        // добавим ссылку на массив
-        else if(header.formula === 'array') {
-            if (is_draft){
-                let my_iframe = $('#iframe_' + header.id)
-                let new_link_addr = my_iframe.attr('src').replace(/owner=\d*$/, 'owner=' + json_object.id)
-                my_iframe.attr('src', new_link_addr)
-            }
-            else{
-                let link_array = $('#a_array_' + header.id)
-                let new_link_text = link_array.attr('href').replace(/input_owner=.*$/, 'input_owner=' + json_object.code)
-                link_array.attr('href', new_link_text)
-                let button_array = $('#iframe_' + header.id)
-                let new_src_text = button_array.attr('src').replace(/input_owner=.*$/, 'input_owner=' + json_object.code)
-                button_array.attr('src', new_src_text)
-            }
-        }
         // добавим формулы
         else if (header.formula === 'eval'){
             let val = (header.id in json_object) ? json_object[header.id].value : ''
@@ -455,8 +439,26 @@ function fill_object_form(is_contract=false, is_draft=false) {
             }
         }
     }
+    // добавим ссылки на массивы
+    let my_path
+    if (is_draft)
+        my_path = (is_contract) ? '/contract-draft' : '/table-draft'
+    else my_path = (is_contract) ? '/contract' : '/manage-object'
 
-    if (!form_control_init || is_draft){
+    for (let i = 0; i < arrays.length; i++){
+        if (is_draft){
+            let iframe_url = my_path + '?class_id=' + arrays[i].id + '&input_owner=' + json_object.code
+            $('#iframe_' + arrays[i].id).attr('src', new_link_url)
+        }
+        else{
+            let link_array = $('#a_array_' + arrays[i].id)
+            let new_link_text = link_array.attr('href').replace(/input_owner=.*$/, 'input_owner=' + json_object.code)
+            link_array.attr('href', new_link_text)
+            let iframe_url = my_path + '?class_id=' + arrays[i].id + '&input_owner=' + json_object.code
+            $('#iframe_' + arrays[i].id).attr('src', iframe_url)
+        }
+    }
+    if ((!form_control_init || is_draft) && json_object.type !== 'tree'){
         form_control_init = true
         let not_draft_new = (is_draft) ? Boolean(json_object.code) : true
         for (let i = 0; i < headers.length; i++){
@@ -598,24 +600,10 @@ function moove_time() {
         if (code[0] === 'u')
             code = code.slice(4)
     }
-    let tag_page_num = $('#s_tl_page_num')
-    let page_num = (tag_page_num.length) ? parseInt(tag_page_num.text()) : 1
-    let event_num_page = parseInt($('#i_hist_range').val())  // Получили номер события на странице
-    let first_page_event_quantity = (array_timeline.timeline.length % 10) ? array_timeline.timeline.length % 10 : 10
-    let page_quantity = Math.ceil(array_timeline.timeline.length / 10)
-    let real_page_num = page_quantity - page_num + 1
-    let event_num = 0
-    for (let i = 1; i <= real_page_num; i++){
-        if (i === real_page_num)
-            event_num += event_num_page
-        else if (i === 1)
-            event_num += first_page_event_quantity
-        else event_num += 10
-    }
-    let timestamp = array_timeline.timeline[event_num].date_update
     let event_name = $('#s_hist_range')
     event_name.text('Информация загружается')
-    if (array_timeline.just_history || event_num < array_timeline.timeline.length - 1){
+    let [timestamp, event_num] = get_timestamp()
+    if (timestamp !== 'now'){
         $.ajax({url: 'get-object-version',
         method:'get',
         dataType:'json',
@@ -643,9 +631,10 @@ function moove_time() {
                 let tl_delay = $('#div_tl_delay')
                 if (tl_delay.attr('class') !== 'tag-invis')
                     tl_delay.attr('class', 'div-disabled')
-                event_name.text(date_time_to_rus(array_timeline.timeline[event_num].date_update) + ' '
-                    + array_timeline.timeline[event_num].user)
-
+                if (array_timeline.timeline.length)
+                    event_name.text(date_time_to_rus(array_timeline.timeline[event_num].date_update) + ' '
+                        + array_timeline.timeline[event_num].user)
+                else event_name.text(date_time_to_rus(timestamp))
             }
         },
         error: function (data) {
@@ -779,7 +768,7 @@ function select_draft(this_select, is_contract=false) {
 
 function fill_arrays(objects, array_id, is_draft=false){
     let table_array = $('#table_array_' + array_id)
-    if (objects)
+    if (objects.length)
         table_array.removeClass('tag_invis')
     else table_array.addClass('tag_invis')
     let tbody = $('#tbody_array_' + array_id)
@@ -789,6 +778,7 @@ function fill_arrays(objects, array_id, is_draft=false){
             continue
         let tr = document.createElement('tr')
         tr.className = 'row'
+        tr.id='trar_' + array_id + '_' + objects[j].code
         tr.setAttribute('style', 'margin: 0;')
         tbody.append(tr)
         // Пройдем по полям, создадим столбцы
@@ -810,11 +800,11 @@ function fill_arrays(objects, array_id, is_draft=false){
                     let obj = objects[j][key]
                     // приведение типов
                     let val
-                    if (obj.type === 'bool')
+                    if (obj.formula === 'bool')
                         val = (obj.value) ? '&#10003;' : ''
-                    else if (obj.type === 'const')
+                    else if (obj.formula === 'const')
                         val = ('result' in obj) ? obj.result : obj.value
-                    else if (obj.type === 'link' && obj.data){
+                    else if (obj.formula === 'link' && obj.data){
                         let url = (obj.data.type === 'contract') ? 'contract' : 'manage-object'
                         url += '?class_id=' + obj.data['parent_structure'] + '&object_code=' + obj.data.code
                         let main_field = (obj.data.type === 'contract') ? 'system_data' : 'Наименование'
@@ -831,11 +821,11 @@ function fill_arrays(objects, array_id, is_draft=false){
                             link_label = date_time_to_rus(link_label)
                         val = '<a href="' + url + '" target="_blank">' + link_label + '</a>'
                     }
-                    else if (obj.type === 'datetime')
+                    else if (obj.formula === 'datetime')
                         val = (obj.value) ? date_time_to_rus(obj.value) : ''
-                    else if (obj.type === 'date')
+                    else if (obj.formula === 'date')
                         val = (obj.value) ? date_to_rus(obj.value) : ''
-                    else if (obj.type === 'file')
+                    else if (obj.formula === 'file')
                         val = (obj.value) ? obj.value.slice(14) : ''
                     else val = obj.value
                     td.innerHTML = val
@@ -845,10 +835,17 @@ function fill_arrays(objects, array_id, is_draft=false){
             tr.appendChild(td)
         }
     }
+
     if (is_draft){
         let obj_ids = []
         objects.forEach(o => obj_ids.push(o.id))
         $('#i_slave_' + array_id).val(JSON.stringify(obj_ids))
+    }
+    // Если у массива есть техпроцессы - показать их
+    if (objects.length){
+        let my_array = arrays.find((el) => el.id === parseInt(array_id))
+        if ('tps' in my_array)
+            crebushot(array_id)
     }
 }
 
@@ -856,17 +853,15 @@ function change_timeline_interval(date_to_now=false){
     if (date_to_now)
         $('#i_timeline_to').val(new Date().toLocaleString('sv'))
     let active_row = $('.row.table-active')
-    active_row.removeClass('table-active')
     let url = get_path_from_url()
     let location = (url === 'tree') ? $('#div_location').html() : (url[0] === 'm') ? 't' : url[0]
-    let object_row = active_row[0]
     for (let i = 0; i < active_row.length; i++){
         if (active_row[i].id[0] !== 'u'){
-            object_row = active_row[i]
+            active_row[i].classList.remove('table-active')
+            sao(active_row[i], location)
             break
         }
     }
-    sao(object_row, location)
 }
 
 
@@ -907,11 +902,8 @@ function sao(this_object, location='t', first_click=false) {
         tl_to_delay.val(delay_date_to.toLocaleString('sv'))
     }
     json_object = {}
-    $('input[id^="i_stage_"]').attr('readonly', false)  // включим редактирование для ТПсов
+    $('input[id^="i_stage_"]').attr('readonly', false)
     roh(class_id, code, location)
-    // Заполним черновики при их наличии
-    // if (['table', 'contract'].includes(json_object.type))
-    //     retreive_object_drafts(json_object)
     $('#span_br').removeClass('text-red')
     $('#chb_br').prop('checked', true)
 }
@@ -995,7 +987,7 @@ function set_array_delay(json_object){
             let delays = joc[headers[j]].delay
             for (let k = 0; k < delays.length; k++){
                 if (delays[k].date_update === timeline_delay[i]){
-                    if (joc[headers[j]].type === 'float')
+                    if (joc[headers[j]].formula === 'float')
                         joc[headers[j]].value += delays[k].value
                     else joc[headers[j]].value = delays[k].value
                 }
@@ -1195,6 +1187,7 @@ function ref_page() {
     change_timeline_interval(true);
 }
 
+
 // Enter в полях блока фильтров
 $('input[id^="sf"]').keypress(function(e) {
     if(e.keyCode === 13){
@@ -1203,3 +1196,51 @@ $('input[id^="sf"]').keypress(function(e) {
     }
 });
 
+
+function del_tps(array_id){
+    $('tr.tr-tps-info').remove()
+    crebushot(array_id)
+}
+
+
+// crebushot = create button show tps
+function crebushot(array_id){
+    let tr = document.createElement('tr')
+        tr.className = 'row'
+        tr.setAttribute('style', 'margin: 0;')
+        $('#tbody_array_' + array_id).append(tr)
+        let td = document.createElement('td')
+        td.className = 'col text-center'
+        td.setAttribute('style', 'padding: 0')
+        tr.appendChild(td)
+        let but = document.createElement('button')
+        but.id = 'b_ar_add_tps_' + array_id
+        but.setAttribute('onclick', 'get_tps(this, ' + json_object.code + ')')
+        but.className = 'btn btn-link btn-sm'
+        but.innerText = 'Добавить информацию о техпроцессах'
+        td.appendChild(but)
+}
+
+
+function get_timestamp(){
+    let tag_page_num = $('#s_tl_page_num')
+    let page_num = (tag_page_num.length) ? parseInt(tag_page_num.text()) : 1
+    let event_num_page = parseInt($('#i_hist_range').val())  // Получили номер события на странице
+    let first_page_event_quantity = (array_timeline.timeline.length % 10) ? array_timeline.timeline.length % 10 : 10
+    let page_quantity = Math.ceil(array_timeline.timeline.length / 10)
+    let real_page_num = page_quantity - page_num + 1
+    let event_num = 0
+    for (let i = 1; i <= real_page_num; i++){
+        if (i === real_page_num)
+            event_num += event_num_page
+        else if (i === 1)
+            event_num += first_page_event_quantity
+        else event_num += 10
+    }
+    let timestamp
+    if (array_timeline.timeline.length === 0)
+        timestamp = (array_timeline.just_history) ? $('#i_timeline_from').val() : 'now'
+    else timestamp = (event_num === array_timeline.timeline.length - 1 && !array_timeline.just_history) ? 'now' :
+        array_timeline.timeline[event_num].date_update
+    return [timestamp, event_num]
+}

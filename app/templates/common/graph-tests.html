@@ -15,14 +15,6 @@
 {% endblock %}
 
 {% block extra_js %}
-    <script>
-        window.onload = function(){
-            let today = new Date()
-            $('input[name="i_date_out"]').val(today.toLocaleString( 'sv', { timeZoneName: 'short' } ).slice(0, 16))
-            today.setMonth(today.getMonth() - 1)
-            $('input[name="i_date_in"]').val(today.toLocaleString( 'sv', { timeZoneName: 'short' } ).slice(0, 16))
-        }
-    </script>
 {% endblock %}
 
 {% block content %}
@@ -32,105 +24,31 @@
 
     <div class="card">
 {#        {% include 'history/report_wdr.html' %}#}
-        <form id="form">
+        <form id="form" method="post">
+            {% csrf_token %}
             <div class="card-body">
-                <h4><a href="/graph_tests">История изменений</a></h4>
+                <h4><a href="/tests-template">История изменений</a></h4>
                 <div class="filter-block">
                     <div class="my-inline-blocks">
                         <span><b>Выберите период</b></span>
-                        <input type="datetime-local" name="i_date_in" class="date4delay" value="{{ date_in }}">
-                        <input type="datetime-local" name="i_date_out" class="date4delay" value="{{ date_out }}">
+                        <input type="datetime-local" step="1" name="i_date_in" class="form-control" value="{{ request.POST.i_date_in }}">
+                        <input type="datetime-local" step="1" name="i_date_out" class="form-control" value="{{ request.POST.i_date_out }}">
                     </div>
                     <div class="my-inline-blocks">
-                        <span><b>ID регистратора</b></span>
-                        <input name="i_filter_reg" class="form-control" style="display: inline; width: 10rem"
-                               list="regs" value="{{ request.GET.i_filter_reg }}">
-                        <datalist id="regs">
-                            {% for r in request.session.temp_data.data.reg_names %}
-                                <option value="{{ r.id }}">{{ r.name }}</option>
-                            {% endfor %}
-                        </datalist>
-                    </div>
-                    <div class="my-inline-blocks">
-                        <span><b>ID класса</b></span>
-                        <input name="i_filter_class" id="i_filter_class" class="form-control" style="display: inline;
-                        width: 5rem" list="dl_classes" value="{{ request.GET.i_filter_class }}" list="dl_classes">
-                        <datalist id="dl_classes"></datalist>
-
-                    </div>
-                    <div class="my-inline-blocks">
-                        <label>Расположение</label>
-                        <select name="s_location" id="s_location" class="form-control"
-                                style="display: inline; width: 10rem" onchange="prompt_classes(); prompt_name()">
-                            <option value="all">Все</option>
-                            <option value="table" {% if request.GET.s_location == 'table' %} selected {% endif %}>Справочники</option>
-                            <option value="contract"{% if request.GET.s_location == 'contract' %} selected {% endif %}>Контракты</option>
+                        <span><b>Выберите Объект</b></span>
+                        <input type="number" name="i_class" class="form-control" value="{{ request.POST.i_class }}" placeholder="укажите ID класса">
+                        <input type="number" name="i_code" class="form-control" value="{{ request.POST.i_code }}" placeholder="укажите код объекта">
+                        <select name="s_loc" class="form-control">
+                            <option value="c" {% if request.POST.s_loc == 'c' %}selected{% endif %}>Контракты</option>
+                            <option value="t" {% if request.POST.s_loc == 't' %}selected{% endif %}>Справочники</option>
                         </select>
                     </div>
-                    <div class="my-inline-blocks">
-                        <label>Тип</label>
-                        <select name="s_type" id="s_type" class="form-control" style="display: inline; width: 10rem"
-                        onchange="prompt_classes(); prompt_name()">
-                            <option value="all">Все</option>
-                            {% for k, v in request.session.class_types.items %}
-                                <option value="{{ k }}"
-                                    {% if k == request.GET.s_type %}
-                                        selected
-                                    {% endif %}
-                                >{{ v }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="my-inline-blocks">
-                        <span><b>Код Объекта</b></span>
-                        <input name="i_filter_object" class="form-control" style="display: inline; width: 5rem"
-                               value="{{ request.GET.i_filter_object }}">
-                    </div>
-                    <div class="my-inline-blocks">
-                        <span><b>ID параметра</b></span>
-                        <input name="i_id" class="form-control" style="display: inline; width: 5rem"
-                               value="{{ request.GET.i_id }}">
-                    </div>
-                    <div class="my-inline-blocks">
-                        <span><b>ID заголовка</b></span>
-                        <input name="i_name" id="i_name" class="form-control" style="display: inline; width: 5rem"
-                               value="{{ request.GET.i_name }}" list="dl_name">
-                        <datalist id="dl_name"></datalist>
-                    </div>
-                    <div class="my-inline-blocks">
-                        <span><b>ID транзакции</b></span>
-                        <input name="i_transact" class="form-control" style="display: inline; width: 10rem"
-                        value="{{ request.GET.i_transact}}">
-                    </div>
-                    <div class="my-inline-blocks">
-                        <span><b>ID род. транзакции</b></span>
-                        <input name="i_parent_transact" class="form-control" style="display: inline; width: 10rem"
-                        value="{{ request.GET.i_parent_transact}}">
-                    </div>
-                    <div class="my-inline-blocks">
-                        <span><b>ID пользователя</b></span>
-                        <input name="i_filter_user" class="form-control" style="display: inline; width: 5rem"
-                               value="{{ request.GET.i_filter_user }}">
-                    </div>
-                    <div class="my-inline-blocks">
-                        <label>Данные</label>
-                        <select name="s_in_out" class="form-control" style="display: inline; width: 10rem">
-                            <option value="all">Все</option>
-                            <option value="in" {% if request.GET.s_in_out == 'in' %} selected{% endif %}>Входящие</option>
-                            <option value="out" {% if request.GET.s_in_out == 'out' %} selected{% endif %}>Исходящие</option>
-                        </select>
-                    </div>
-                    <div class="my-inline-blocks">
-                        <label>Показывать только значения</label>
-                        <input type="checkbox" name="chb_only_values"
-                            {% if request.GET.chb_only_values == 'on' %}
-                                checked
-                           {% endif %}
-                        >
-                    </div>
-                    <input type="submit" value="фильтровать" class="btn-outline-primary btn"
-                        style="vertical-align: top">
+                    <input type="submit" value="чистить" class="btn-outline-primary btn" style="vertical-align: top"
+                    name="b_clean">
+                    <input type="submit" value="показать объекты" class="btn-outline-primary btn" style="vertical-align: top"
+                    name="b_show">
                 </div>
+                {{ table|safe }}
             </div>
         </form>
     </div>

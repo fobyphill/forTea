@@ -1,9 +1,7 @@
 import os
-
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
 from app.other.global_vars import root_folder
-
 from app.models import RegName, DataTypesList, ClassTypesList, MainPageAddress
 
 
@@ -44,6 +42,9 @@ def initialisation():
         result = True
     # инициализация базового пользователя
     if not get_user_model().objects.all().count():
+        robot_dummy = User.objects.create_user(is_superuser=False, is_staff=True, is_active=True, username='dummy',
+                                               password='dummy', first_name='robot', last_name='dummy')
+        robot_dummy.save()
         first_user = User.objects.create_user(is_superuser=True, is_staff=True, is_active=True, username='admin', password='admin')
         first_user.save()
         result = True

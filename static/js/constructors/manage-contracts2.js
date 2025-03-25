@@ -133,7 +133,8 @@ function save_stages() {
                 children.push(this.value)
         })
         let stage = {'id': this.id, 'name': $('#i_stage_name_' + this.id).val(),
-            'handler': $('#i_stage_handler_' + this.id).val(), 'children': children}
+            'handler': $('#i_stage_handler_' + this.id).val(), 'children': children,
+            'visible': $('#chb_visible_' + this.id).prop('checked')}
         array_stages.push(stage)
     })
     result = JSON.stringify(array_stages)
@@ -228,3 +229,74 @@ function init_input_user(this_input) {
     get_users(this_input, output_data)
 }
 
+function make_tp_br(this_button){
+    let loc = this_button.id.slice(2, 4)
+    let parent_tag = this_button.parentElement
+    this_button.remove()
+    parent_tag.appendChild(document.createElement('hr'))
+    let div_stages = document.createElement('div')
+    div_stages.className = 'input-group mb-1'
+    parent_tag.appendChild(div_stages)
+    let span_stages = document.createElement('span')
+    span_stages.className = 'input-group-text'
+    span_stages.innerText = 'Стадии'
+    div_stages.appendChild(span_stages)
+    let select_stages = document.createElement('select')
+    select_stages.className = 'form-control'
+    select_stages.id = 'select_stages_new_' + loc + '4tp'
+    let tp_fields = JSON.parse($('#fields').html())
+    let size_fields = String(tp_fields.length)
+    select_stages.setAttribute('size', size_fields)
+    select_stages.setAttribute('multiple', '')
+    for (let i = 0; i < tp_fields.length; i++){
+        let op = document.createElement('option')
+        op.value = tp_fields[i].id
+        op.innerText = tp_fields[i].name
+        select_stages.appendChild(op)
+    }
+    div_stages.appendChild(select_stages)
+    // Тип действия
+    let div_delay_update = document.createElement('div')
+    div_delay_update.className = 'input-group mb-1'
+    parent_tag.appendChild(div_delay_update)
+    let span_delay_update = document.createElement('span')
+    span_delay_update.className = 'input-group-text'
+    span_delay_update.innerText = 'Действия'
+    div_delay_update.appendChild(span_delay_update)
+    let label_delay = document.createElement('label')
+    label_delay.className = 'form-control'
+    label_delay.appendChild(document.createTextNode('Delay  '))
+    div_delay_update.appendChild(label_delay)
+    let chb_delay = document.createElement('input')
+    chb_delay.type = 'checkbox'
+    chb_delay.id = 'chb_' + loc + '_delay_new'
+    label_delay.appendChild(chb_delay)
+    let label_update = document.createElement('label')
+    label_update.className = 'form-control'
+    label_update.appendChild(document.createTextNode('Update '))
+    div_delay_update.appendChild(label_update)
+    let chb_update = document.createElement('input')
+    chb_update.type = 'checkbox'
+    chb_update.id = 'chb_' + loc + '_update_new'
+    label_update.appendChild(chb_update)
+    // Код
+    let div_code = document.createElement('div')
+    div_code.className = 'input-group mb-1'
+    parent_tag.appendChild(div_code)
+    let span_code = document.createElement('span')
+    span_code.className = 'input-group-text'
+    span_code.innerText = 'Код'
+    div_code.appendChild(span_code)
+    let ta_code = document.createElement('textarea')
+    ta_code.id = 'ta_code_new_' + loc + '4tp'
+    ta_code.className = 'form-control'
+    ta_code.style.minHeight = '4rem'
+    div_code.appendChild(ta_code)
+}
+
+function delete_br(this_button){
+    this_button.previousElementSibling.remove()
+    this_button.previousElementSibling.remove()
+    this_button.previousElementSibling.remove()
+    this_button.remove()
+}

@@ -4,6 +4,7 @@ from copy import deepcopy, copy
 from datetime import datetime
 from functools import reduce
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import F, Subquery, Q
 from django.forms import model_to_dict
@@ -11,8 +12,10 @@ from django.forms import model_to_dict
 import app.functions.interface_funs
 import app.functions.interface_procedures
 from app.functions import api_funs, convert_funs, interface_procedures, convert_procedures, reg_funs, database_funs, \
-    task_funs, convert_funs2
-from app.models import ContractCells, Contracts, RegistratorLog, Tasks, TechProcessObjects, TechProcess
+    task_funs, convert_funs2, api_procedures, contract_procedures, session_procedures
+from app.functions.contract_procedures import rex
+from app.models import ContractCells, Contracts, RegistratorLog, Tasks, TechProcessObjects, TechProcess, Designer, \
+    Objects
 
 
 # Выполнить триггер
@@ -32,16 +35,17 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
             if alm['method'] == 'edit':
                 if type(alm['code']) is int:
                     code = alm['code']
-                    object = ContractCells.objects.filter(parent_structure_id=alm['contract'], code=alm['code'])
+                    object = ContractCells.objects.filter(parent_structure_id=alm['class_id'], code=alm['code'])
                     if not object:
-                        return 'Ошибка. Некорректно указан код контракта ID: ' + str(alm['contract'])
-                    headers = Contracts.objects.filter(parent_id=alm['contract']).exclude(system=True).values()
-                    object = convert_funs2.get_full_object(object, headers, 'contract')
+                        return 'Ошибка. Некорректно указан код контракта ID: ' + str(alm['class_id'])
+                    headers = Contracts.objects.filter(parent_id=alm['class_id']).exclude(system=True).values()
+                    current_class = Contracts.objects.get(id=alm['class_id'])
+                    object = convert_funs2.get_full_object(object, current_class, headers, 'contract')
                 elif type(alm['code']) is list:
                     object = alm['code'][0]
                     code = object['code']
                 else:   return 'Ошибка. Некорректно задана формула, определяющая формулу. ID контракта: ' + \
-                               str(alm['contract'])
+                               str(alm['class_id'])
                 for p in alm['params']:
                     try:
                         old_param = object[p['id']]
@@ -58,7 +62,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                     else:
                         val = p['value']
                     params[str(p['id'])] = val
-                result = api_funs.edit_object(alm['contract'], code, user_id, 'contract', None,
+                result = api_funs.edit_object(alm['class_id'], code, user_id, 'contract', None,
                                               *list_contracts, **params)
                 if type(result) is str and result.lower()[:6] == 'ошибка':
                     return result
@@ -67,7 +71,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                 for p in alm['params']:
                     if p['sign'] == '-':    p['value'] *= -1
                     params[str(p['id'])] = p['value']
-                result = api_funs.create_object(alm['contract'], user_id, 'contract', **params)
+                result = api_funs.create_object(alm['class_id'], user_id, 'contract', **params)
                 if type(result) is str:
                     return result
             # для операции "Списание"
@@ -76,7 +80,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                 objs = []
                 old_params = alm['code']
                 if not old_params:  return 'Ошибка. Некорректно задана формула для кода объекта списания. ' +\
-                                               'ID контракта' + str(alm['contract'])
+                                               'ID контракта' + str(alm['class_id'])
                 for p in alm['params']:
                     # прямое списание
                     if p['value'] >= 0:
@@ -106,7 +110,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                     else:
                         pa_tr = 'c' + str(presaved_objs[0]['parent_structure']) + 'c' + str(presaved_objs[0]['code']) + 'id'
                         hist = list(RegistratorLog.objects.filter(parent_transact_id__startswith=pa_tr, reg_name=15,
-                                                                  json__name=p['id'], json__class_id=alm['contract'])\
+                                                                  json__name=p['id'], json__class_id=alm['class_id'])\
                                     .order_by('-id'))
                         if not hist:
                             return 'Ошибка. Нет истории списания. Возврат объекта невозможен'
@@ -140,7 +144,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                             i += 1
                         # Вернем объекты на свои места хранения
                         for h in hist:
-                            old_obj = ContractCells.objects.get(parent_structure_id=alm['contract'], code=h.json['code'],
+                            old_obj = ContractCells.objects.get(parent_structure_id=alm['class_id'], code=h.json['code'],
                                                             name_id=h.json['name'])
                             try:
                                 obj = next(o for o in objs if o['code'] == h.json['code'])
@@ -165,7 +169,7 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
                 for o in objs:
                     code = o['code']
                     del o['code']
-                    result = api_funs.edit_object(alm['contract'], code, user_id, 'contract', None,
+                    result = api_funs.edit_object(alm['class_id'], code, user_id, 'contract', None,
                                                   *list_contracts, **o)
                     if type(result) is str and result.lower()[:6] == 'ошибка':
                         return result
@@ -183,12 +187,18 @@ def do_trigger(array_linkmap, trigger, presaved_objs, user_id, timestamp, parent
 
 # Упаковать линкМап. Собирает в массив данные из поля ЛинкМап
 # kwargs = {mode: c/e (create/edit)}
-def pack_linkmap(linkmap, objects, edit_objs, user_id):
+def pack_linkmap(linkmap, objects, edit_objs, user_id, event_kind):
     list_triggers = []
     for lm in linkmap['value']:
+        # Проверка выполнения линкмапа в соответствии с типом события
+        for ek in lm['event_kind']:
+            if ek in event_kind:
+                break
+        else:
+            continue
         dict_trigger = {}
         dict_trigger['method'] = 'edit'
-        dict_trigger['contract'] = lm['contract']
+        dict_trigger['class_id'] = lm['class_id']
         code = None
         if lm['new_code']:
             dict_trigger['method'] = 'new'
@@ -243,107 +253,6 @@ def pack_linkmap(linkmap, objects, edit_objs, user_id):
     return list_triggers
 
 
-def old_pack_linkmap(linkmap, objects, edit_objs, user_id):
-    flags = re.IGNORECASE
-    str_linkmap = re.sub('\n', '', linkmap['value'])
-    array_trigger_params = re.findall(r'.+?(?:\;|$)', str_linkmap, flags=flags)
-    list_triggers = []
-    if not array_trigger_params:
-        return list_triggers
-    for atp in array_trigger_params:
-        dict_trigger = {}
-        dict_trigger['method'] = 'edit'
-        contract_id = re.match(r'.*contract\s*=\s*(\d+)', atp, flags=flags)
-        if not contract_id:
-            return False
-        contract_id = int(contract_id[1])
-        dict_trigger['contract'] = contract_id
-        code = re.match(r'.*code\s*=\s*(\d+)', atp, flags=flags)
-        # Если код задан неявным образом - вычислим его
-        if code:
-            code = int(code[1])
-        else:
-            # Есть ли в коде параметр new
-            if re.search(r'code\s*=\s*(?:\[\[.*\]\]\s*or|)\s+new', atp, re.S):
-                dict_trigger['method'] = 'new'
-            # Если в качестве кода задана формула, возвращающая массив данных
-            match_formula = re.search(r'.*code\s*=\s*(\[\[(?:.*?(?:\[\[.*?\]\]|))+?\]\])', atp, re.S)
-            if match_formula:
-                linkmap['value'] = 'result = ' + match_formula[1]
-                convert_funs.deep_formula(linkmap, objects, user_id, True)
-                val = objects[0][linkmap['id']]['value']
-                if not type(val) is list:
-                    return False
-                del objects[0][linkmap['id']]
-                # Если не нашлось объектов по требуемым условиям и нет условия "Найти или создать", то вернуть ошибку
-                if not val:
-                    if dict_trigger['method'] != 'new':
-                        return False
-                else:
-                    dict_trigger['method'] = 'edit'
-                    code = val
-            elif dict_trigger['method'] != 'new':
-                return False
-        dict_trigger['code'] = code
-        # Списание
-        match_wo = re.search(r'write-off(?:\s*=\s*\[(.*?)\]|)', atp, flags=flags)
-        sign = '-'
-        if match_wo:
-            dict_trigger['method'] = 'wo'
-            is_lifo = False
-            if match_wo.lastindex > 0:
-                match_lifo = re.search(r'(lifo|fifo)', match_wo[1], flags=flags)
-                if match_lifo and match_lifo[1] == 'lifo':
-                    is_lifo = True
-                match_sign = re.search(r'[+-]', match_wo[1], flags=flags)
-                if match_sign and match_sign[0] == '+':
-                    sign = '+'
-            dict_trigger['wo_params'] = {'lifo': is_lifo, 'sign': sign}
-
-        dict_trigger['params'] = []
-        params = re.match(r'.*params\s*=\s*\{(.*)\}', atp, flags=flags)
-        if not params:
-            return False
-        array_params = re.findall(r'(.+?)(?:$|\,)', params[1], flags=flags)
-        for ap in array_params:
-            param = {}
-            id = re.match(r'.*id\s*=\s*(\d+)', ap, flags=flags)
-            if not id:
-                return False
-            param['id'] = int(id[1])
-            if match_wo:
-                param['sign'] = sign
-            else:
-                sign = re.match(r'.*sign\s*=\s*([+-e])', ap, flags=flags)
-                param['sign'] = sign[1] if sign else 'e'
-            val = re.match(r'.*value\s*=\s*(.+?)(:?\,|sign|id|write-off|limit|$)', ap, flags=flags)
-            if not val:
-                return False
-            elif re.match(r'.*\[\[', val[1]):
-                linkmap['value'] = 'result = ' + val[1]
-                if param['sign'] == 'e':
-                    convert_funs.deep_formula(linkmap, objects, user_id, True)
-                    val = objects[0][linkmap['id']]['value']
-                    del objects[0][linkmap['id']]
-                else:
-                    convert_funs.deep_formula(linkmap, edit_objs, user_id, True)
-                    val = edit_objs[0][linkmap['id']]['value']
-                    del edit_objs[0][linkmap['id']]
-                if type(val) is str and val[:6].lower() == 'ошибка':
-                    return False
-            else:
-                try:
-                    val = float(val[1])
-                except ValueError:
-                    val = val[1]
-            param['value'] = val
-            match_limit = re.search(r'limit\s*=\s*([glten]{2}(?:\-|)\d+)', ap, flags=flags)
-            param['limit'] = match_limit[1] if match_limit else 'gt0'
-            dict_trigger['params'].append(param)
-        list_triggers.append(dict_trigger)
-    return list_triggers
-
-
 # Отработака бизнес-правила. Вход айди контракта, словарь с данными
 # Выход - Да/нет
 def do_business_rule(biz_rule_header, presaved_object, user_id):
@@ -358,65 +267,10 @@ def do_business_rule(biz_rule_header, presaved_object, user_id):
             biz_rule_done = bool(result)
     return biz_rule_done
 
-
-# dcsp - do_contract_system_params
-# Возвращает строку. Если все ок - вернет ок. Если есть текст - это текст ошибки
-def dcsp(contract_id, code, headers, user_id, dict_object, dict_edit_object, timestamp, parent_transact,
-         *list_contracts, **params):
-    def make_error(txt):
-        raise Exception(txt)
-    # Проверка цикличности
-    if contract_id in list_contracts:
-        return 'Ошибка. В цепочке триггеров наблюдается цикличная ссылочность. ' \
-               'Проверьте поля link_map всех контрактов в цепочке<br>'
-    else:
-        list_contracts = list(list_contracts)
-        list_contracts.append(contract_id)
-
-    system_names = ('business_rule', 'link_map', 'trigger')
-    system_params = Contracts.objects.filter(parent_id=contract_id, name__in=system_names).values()
-
-    # 1. отработаем бизнес-правило
-    biz_rule = next(sp for sp in system_params if sp['name'] == 'business_rule')
-    old_obj = ContractCells.objects.filter(parent_structure_id=contract_id, code=code)
-    presaved_object = app.functions.interface_procedures.mofr(code, contract_id, headers, dict_object, old_obj, True)
-    if 'tps' in params and params['tps']:
-        presaved_object['tps'] = params['tps']
-    if not do_business_rule(biz_rule, presaved_object, user_id):
-        return 'Ошибка. Не выполняется бизнес-правило контракта<br>'
-
-    # 2. Отработаем линкмап
-    link_map = next(sp for sp in system_params if sp['name'] == 'link_map')
-    array_link_map = []
-    objs = (presaved_object, )
-    if link_map['value']:
-        presaved_edit_object = app.functions.interface_procedures.mofr(code, contract_id, headers, dict_edit_object,
-                                                                       old_obj, True)
-        edit_objs = (presaved_edit_object,)
-        array_link_map = pack_linkmap(link_map, objs, edit_objs, user_id)
-        if not array_link_map and type(array_link_map) is bool:
-            return 'Ошибка. LinkMap задан некорректно<br>'
-
-    @transaction.atomic()
-    def atom_operation():
-    # 3. Отработаем триггеры
-        trigger = next(sp for sp in system_params if sp['name'] == 'trigger')
-        res_trigger = do_trigger(array_link_map, trigger, objs, user_id, timestamp, parent_transact, *list_contracts)
-        if res_trigger != 'ok':
-            make_error(res_trigger)
-
-
-    # Выполним атомарные функции
-    try:
-        atom_operation()
-    except Exception as ex:
-        return str(ex)
-    return 'ok'
-
-
 # Проверка объектов контракта на выполнение BR
 # vocobru - verify objects contract on business rule
 # вход - бизнес правило в виде объекта кверисета Выход - Да/нет
+# Устарела. Удалить после 15.04.2025
 def vocobru(br, user_id):
     if not br.value:
         return True
@@ -455,114 +309,406 @@ def ctp4s(array_code, tp_id, parent_code_id, stage_id, cf_id, stages):
     return True
 
 
-# tps - список.
-def save_edited_tps(tps, presaved_object, dict_edit, timestamp, user_id, parent_transact=None):
-
-    def make_task(receiver, fact, state, delay, delta, stage_name, task_code):
-
-        data = {'tp_id': tp_key, 'tp_name': tp_info['name'], 'parent_code': presaved_object['code'], 'fact': fact,
-                'state': state,
-                'delay': delay, 'delta': delta, 'stage': stage_name, 'sender_id': user_id}
-        task = Tasks(date_create=timestamp, user_id=receiver, data=data, code=task_code, kind='stage')
-        task.save()
-        task = model_to_dict(task)
-        task['date_create'] = datetime.strftime(task['date_create'], '%Y-%m-%dT%H:%M:%S')
-        reg = {'json': task}
-        reg_funs.simple_reg(user_id, 18, timestamp, task_transact_id, transact_id, **reg)
-
-    def reg_create_task():
-        task_code = database_funs.get_other_code('task')
-        task_transact_id = reg_funs.get_transact_id('task', task_code)
-        reg = {'json': {'code': task_code}}
-        reg_funs.simple_reg(user_id, 17, timestamp, task_transact_id, transact_id, **reg)
-        return task_code, task_transact_id
-
-    for tp_key, tp_val in presaved_object['tps'].items():
-        tp_info = next(tp for tp in tps if tp['id'] == tp_key)
-        # Проверка бизнес-правила техпроцесса
-        header_br = next(p for p in tp_info['system_params'] if p['name'] == 'business_rule')
-        if not do_business_rule(header_br, presaved_object, user_id):
-            return 'Ошибка. Не выполняется бизнес-правило техпроцесса ID ' + str(tp_info['id'])
-
-        transact_id = reg_funs.get_transact_id(tp_key, presaved_object['code'], 'p')
-
-        # Проверим, изменилось ли контрольное поле
-        key_cf = 'i_float_' + str(tp_info['cf'])
-        delta_cf = dict_edit[key_cf]
-        if delta_cf:
-            first_stage = TechProcessObjects.objects.get(parent_code=presaved_object['code'],
-                                                         parent_structure_id=tp_info['id'],
-                                                         name_id=tp_info['stages'][0]['id'])
-            inc = {'class_id': tp_info['id'], 'code': presaved_object['code'],
-                   'location': 'contract', 'type': 'tp', 'name': first_stage.name_id, 'id': first_stage.id,
-                   'value': deepcopy(first_stage.value)}
-            first_stage.value['fact'] += delta_cf
-            first_stage.save()
-            outc = inc.copy()
-            outc['value'] = deepcopy(first_stage.value)
-            reg = {'json': outc, 'json_income': inc}
-            reg_funs.simple_reg(user_id, 15, timestamp, transact_id, parent_transact, **reg)
-
-        old_stages = TechProcessObjects.objects.filter(parent_structure_id=tp_key, parent_code=presaved_object['code'])
-        task_code = None
-        task_transact_id = None
-        is_anybody_handlers = False
-
-        for stage_key, stage_val in tp_val.items():
-            stage_info = next(hl for hl in header_linkmap['value'] if hl['name'] == stage_key)
-            try:
-                stage = next(os for os in old_stages if os.value['stage'] == stage_key)
-            except StopIteration:
-                if stage_info['handler']:
-                    is_anybody_handlers = True
-                if stage_val['state']:
-                    delay = [{'date_create': datetime.strftime(timestamp, '%Y-%m-%dT%H:%M:%S'),
-                              'value': stage_val['state']}]
-                    fact = 0
-                    if not task_code:
-                        task_code, task_transact_id = reg_create_task()
-                    make_task(stage_info['handler'], fact, stage_val['state'], stage_val['state'],
-                              stage_val['state'], stage_key, task_code)
+@transaction.atomic()
+def edit_contract(current_class, code, class_params, system_params, tps, edit_objects, new_objects, object_user, timestamp,
+                   *list_contracts, **params):
+    if current_class.id in list_contracts:
+        rex('Ошибка. Наблюдается циклическая ссылочность в цепочке линкмапов контрактов')
+    else:
+        list_contracts = list(list_contracts)
+        list_contracts.append(current_class.id)
+    tps_all = params['tps_all'] if 'tps_all' in params else None
+    general_reg_data = {'class_id': current_class.id, 'code': code, 'location': 'contract',
+                        'type': current_class.formula}
+    control_fields = [t['cf'] for t in tps]
+    transact_id = params['transact_id'] if 'transact_id' in params else reg_funs.get_transact_id(current_class.id, code, 'c')
+    parent_transact = params['parent_transact'] if 'parent_transact' in params else None
+    if edit_objects:
+        ContractCells.objects.bulk_update([eo['new_obj'] for eo in edit_objects if 'old_value' in eo], ['value'])
+        ContractCells.objects.bulk_update([eo['new_obj'] for eo in edit_objects if 'old_delay' in eo], ['delay'])
+        # регистрация редактирования создание тасков для делеев
+        for eo in edit_objects:
+            ic = general_reg_data.copy()
+            ic['id'] = eo['new_obj'].id
+            ic['name'] = eo['new_obj'].name_id
+            oc = ic.copy()
+            if 'old_value' in eo:
+                ic_val = ic.copy()
+                ic_val['value'] = eo['old_value']
+                oc_val = oc.copy()
+                oc_val['value'] = eo['new_obj'].value
+                reg_val = {'json_income': ic_val, 'json': oc_val}
+                reg_funs.simple_reg(object_user.id, 15, timestamp, transact_id, parent_transact, **reg_val)
+            if 'old_delay' in eo:
+                make_delay = len(eo['new_obj'].delay) > len(eo['old_delay'])
+                last_delay = eo['new_obj'].delay[-1] if make_delay else eo['old_delay'][-1]
+                date_update = datetime.strptime(last_delay['date_update'], '%Y-%m-%dT%H:%M')
+                ic_del = ic.copy()
+                ic_del['delay'] = eo['old_delay']
+                oc_del = oc.copy()
+                if date_update < timestamp and make_delay:
+                    delay_ppa = True
+                    date_delay = last_delay['date_update']
+                    date_update = datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
+                    last_delay['date_update'] = date_update
+                    eo['new_obj'].save()
                 else:
-                    delay = []
-                    fact = stage_val['state']
-                val = {'fact': fact, 'delay': delay, 'stage': stage_key}
-                new_stage = TechProcessObjects(parent_structure_id=tp_info['id'], parent_code=presaved_object['code'],
-                                               value=val, name_id=header_stages['id'])
-                new_stage.save()
-                outc = {'class_id': tp_info['id'], 'type': 'techprocess', 'location': 'contract',
-                        'id': new_stage.id, 'code': presaved_object['code'], 'name': header_stages['id'],
-                        'value': new_stage.value}
-                reg = {'json': outc}
-                reg_funs.simple_reg(user_id, 13, timestamp, transact_id, parent_transact, **reg)
+                    delay_ppa = False
+                    date_delay = None
+                oc_del['delay'] = eo['new_obj'].delay
+                reg_del = {'json': oc_del, 'json_income': ic_del, 'date_delay': date_delay}
+                reg_funs.simple_reg(object_user.id, 22, timestamp, transact_id, parent_transact, **reg_del)
+                current_param = next(cp for cp in class_params if cp['id'] == eo['new_obj'].name_id)
+                prms = {}
+                if 'task_code' in eo:
+                    prms['code'] = eo['task_code']
+                if 'task_transact' in eo:
+                    prms['task_transact'] = eo['task_transact']
+                if eo['new_obj'].name_id in control_fields:
+                    prms['cf'] = True
+                if make_delay:  # Создаем / регистрируем таск
+                    interface_procedures.make_task_4_delay(current_param, eo['new_obj'], 'c', object_user, timestamp,
+                                                           delay_ppa, transact_id, **prms)
+
+    if new_objects:
+        ContractCells.objects.bulk_create(new_objects)
+        new_objects = ContractCells.objects.filter(parent_structure_id=current_class.id, code=code,
+                                                   name_id__in=[no.name_id for no in new_objects])
+        for no in new_objects:
+            # Регистрация создания реквизитов
+            oc = general_reg_data.copy()
+            oc['id'] = no.id
+            oc['name'] = no.name_id
+            oc['value'] = no.value
+            reg = {'json': oc}
+            reg_funs.simple_reg(object_user.id, 13, timestamp, transact_id, parent_transact, **reg)
+            if no.delay:
+                del oc['value']
+                oc['delay'] = no.delay
+                date_update = datetime.strptime(no.delay[-1]['date_update'], '%Y-%m-%dT%H:%M')
+                delay_ppa = True if date_update < timestamp else False
+                if delay_ppa:
+                    date_delay = date_update
+                    no.delay[-1]['date_update'] = datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
+                    no.save()
+                else:
+                    date_delay = None
+                ic = oc.copy()
+                ic['delay'] = []
+                reg = {'json': oc, 'json_income': ic, 'date_delay': date_delay}
+                reg_funs.simple_reg(object_user.id, 22, timestamp, transact_id, **reg)
+                current_param = next(cp for cp in class_params if cp['id'] == no.name_id)
+                interface_procedures.make_task_4_delay(current_param, no, 'c', object_user, timestamp, delay_ppa,
+                                                       transact_id)  # Создаем / регистрируем таск
+
+    saved_queryset = ContractCells.objects.filter(parent_structure_id=current_class.id, code=code)
+    saved_obj = None
+    if tps_all:
+        # Проверим бизнес-правила и LinkMapы ТПсов
+        for tak, tav in tps_all.items():
+            if tav['changed']:
+                my_tp = next(tp for tp in tps if tp['id'] == tak)
+                edit_tp(my_tp, tav, code, current_class, class_params, timestamp, parent_transact, object_user.id)
+
+    # для контрактов отработаем системные поля
+    if current_class.formula == 'contract':
+        event_kind = params['event_kind'] if 'event_kind' in params else ['u']
+        if not saved_obj:
+            saved_obj = convert_funs2.get_full_object(saved_queryset, current_class, class_params, 'contract')
+
+        # 1. отработаем бизнес-правило
+        if event_kind != ['r']:
+            biz_rule = next(sp for sp in system_params if sp['name'] == 'business_rule')
+            if not do_business_rule(biz_rule, saved_obj, object_user.id):
+                raise Exception('Ошибка. Не выполняется бизнес-правило контракта<br>')
+
+        # 2. выполним линкМап
+        linkmap = next(sp for sp in system_params if sp['name'] == 'link_map')
+        if linkmap['value']:
+            do_linkmap(linkmap['value'], saved_obj, event_kind, timestamp, transact_id, object_user.id, *list_contracts)
+
+        # выполним триггер
+        trigger = next(sp for sp in system_params if sp['name'] == 'trigger')
+        if trigger['value']:
+            objs = [saved_obj]
+            convert_funs.deep_formula(trigger, objs, object_user.id, True)
+            rex(saved_obj[trigger['id']]['value'])
+    return saved_queryset
+
+
+@transaction.atomic()
+def new_contract(current_class, class_params, system_params, objects, object_user, timestamp, tps, parent_transact, *list_contracts):
+    if current_class.id in list_contracts:
+        rex('Ошибка. Наблюдается циклическая ссылочность в цепочке линкмапов контрактов')
+    else:
+        list_contracts = list(list_contracts)
+        list_contracts.append(current_class.id)
+    code = objects[0].code
+    transact_id = app.functions.reg_funs.get_transact_id(current_class.id, code, 'c')
+    ContractCells.objects.bulk_create(objects)
+    new_reqs = ContractCells.objects.filter(parent_structure_id=current_class.id, code=code)
+    # для контрактов отработаем системные поля
+    if current_class.formula == 'contract':
+        saved_obj = convert_funs2.get_full_object(new_reqs, current_class, class_params, 'contract')
+
+        # 1. отработаем бизнес-правило
+        biz_rule = next(sp for sp in system_params if sp['name'] == 'business_rule')
+        if biz_rule['value'] and not do_business_rule(biz_rule, saved_obj, object_user.id):
+            raise Exception('Ошибка. Не выполняется бизнес-правило контракта<br>')
+
+        # 2. выполним линкМап
+        linkmap = next(sp for sp in system_params if sp['name'] == 'link_map')
+        if linkmap['value']:
+            do_linkmap(linkmap['value'], saved_obj, ('m', ), timestamp, transact_id, object_user.id, *list_contracts)
+
+        # выполним триггер
+        trigger = next(sp for sp in system_params if sp['name'] == 'trigger')
+        objs = [saved_obj]
+        if trigger['value']:
+            convert_funs.deep_formula(trigger, objs, object_user.id, True)
+            rex(saved_obj[trigger['id']]['value'])
+
+    # # регистрация создания объекта
+    outcoming = {'class_id': current_class.id, 'location': 'contract', 'type': current_class.formula, 'code': code}
+    reg = {'json': outcoming}
+    reg_funs.simple_reg(object_user.id, 5, timestamp, transact_id, parent_transact, **reg)
+    control_fields = [t['cf'] for t in tps]
+
+    # Регистрация реквизитов объекта
+    for nr in new_reqs:
+        outcom = model_to_dict(nr)
+        del outcom['code']
+        del outcom['parent_structure']
+        outcom.update(outcoming)
+        if nr.delay:
+            outcom_delay = deepcopy(outcom)
+            del outcom_delay['value']
+            reg_delay = {'json': outcom_delay}
+            reg_funs.simple_reg(object_user.id, 22, timestamp, transact_id, **reg_delay)
+            current_param = next(cp for cp in class_params if cp['id'] == nr.name_id)
+            # Создаем / регистрируем таск
+            prms = {}
+            if nr.name_id in control_fields:
+                prms['cf'] = True
+            interface_procedures.make_task_4_delay(current_param, nr, 'c', object_user, timestamp, False, transact_id, **prms)
+        del outcom['delay']
+        reg = {'json': outcom}
+        reg_funs.simple_reg(object_user.id, 13, timestamp, transact_id, parent_transact, **reg)
+    # cохраним техпроцессы
+    for tp in tps:
+        try:
+            control_field = next(nop for nop in new_reqs if nop.name_id == tp['cf'])
+        except StopIteration:
+            val = {'fact': 0, 'delay': []}
+        else:
+            val = control_field.value if control_field.value else 0
+            val = {'fact': val, 'delay': []}
+        first_stage = TechProcessObjects(parent_structure_id=tp['id'], parent_code=code,
+                                         name_id=tp['stages'][0]['id'], value=val)
+        first_stage.save()
+        outc = model_to_dict(first_stage)
+        outc['class_id'] = outc['parent_structure']
+        del outc['parent_structure']
+        outc['code'] = outc['parent_code']
+        del outc['parent_code']
+        outc['location'] = 'contract'
+        outc['type'] = 'tp'
+        reg = {'json': outc}
+        trans_tp = reg_funs.get_transact_id(tp['id'], code, 'p')
+        reg_funs.simple_reg(object_user.id, 13, timestamp, trans_tp, transact_id, **reg)
+
+    return new_reqs
+
+
+@transaction.atomic()
+def prepare_to_delete_object(lm, tr, del_obj, ts, parent_transact, user_id):
+    if lm:
+        do_linkmap(lm, del_obj, ['r'], ts, parent_transact, user_id)
+    if tr['value']:
+        convert_funs.deep_formula(tr, [del_obj], user_id, True)
+        trigger_res = del_obj[tr['id']]['value']
+        rex(trigger_res)
+
+
+def do_linkmap(linkmap, parent_obj, event_kind, timestamp, parent_transact, user_id, *list_contracts, **params):
+    objs = [parent_obj]
+    list_contracts = list(list_contracts)
+    tp = params['tp'] if 'tp' in params else None
+    for lm in linkmap:
+        # Проверка выполнения линкмапа в соответствии с типом события
+        for ek in lm['event_kind']:
+            if ek in event_kind:
+                break
+        else:
+            continue
+        # для техпроцессов. Проверка соответствия стадии
+        if tp:
+            for tpk, tpv in tp.items():
+                if tpk in lm['stages'] and tpv['delta']:
+                    break
             else:
-                inc = {'class_id': tp_info['id'], 'type': 'techprocess', 'location': 'contract',
-                       'id': stage.id, 'code': presaved_object['code'], 'name': header_stages['id'],
-                       'value': deepcopy(stage.value)}
-                old_delay = sum([d['value'] for d in stage.value['delay']])
-                old_fact = stage.value['fact'] if stage.value['fact'] else 0
-                old_stage = old_fact + old_delay
-                if stage_val['state'] != old_stage:
-                    delta = stage_val['state'] - old_stage
-                    new_delay = {'value': delta,
-                                 'date_create': datetime.strftime(timestamp, '%Y-%m-%dT%H:%M:%S')}
-                    stage.value['delay'].append(new_delay)
-                    if not task_code:
-                        task_code, task_transact_id = reg_create_task()
-                    make_task(stage_info['handler'], stage_val['fact'], stage_val['state'], delta + old_delay,
-                              delta, stage_key, task_code)
-                    outc = inc.copy()
-                    outc['value'] = stage.value.copy()
-                    stage.save()
-                    reg = {'json': outc, 'json_income': inc}
-                    reg_funs.simple_reg(user_id, 15, timestamp, transact_id, parent_transact, **reg)
-                    if stage_info['handler']:
-                        is_anybody_handlers = True
-        # Если изменения были, но ответственные не нашлись, значит сразу выполним таск
-        if not is_anybody_handlers and task_code:
-            task = Tasks.objects.filter(code=task_code)
-            for t in task:
-                check_task = True if task.index(t) == len(task) - 1 else False
-                task_funs.change_task_stage(user_id, t, timestamp, check_task=check_task,
-                                            is_approve=True)
-    return 'ok'
+                continue
+
+        is_contract = not 'loc' in lm or lm['loc'] == 'c'
+        location = 'contract' if is_contract else 'table'
+        child_objs = []
+        if not lm['code'] and lm['method'] != 'n':
+            rex('Ошибка. Некорректно задан код объекта в ЛинкМап<br>')
+        try:
+            code = int(lm['code'])
+        except ValueError:
+            if lm['code']:
+                header = {'id': 0, 'name': 'my_name', 'value': lm['code']}
+                convert_funs.deep_formula(header, objs, user_id, is_contract)
+                res = parent_obj[0]['value']
+                parent_obj.pop(0)
+                try:
+                    code = int(res)
+                except ValueError:
+                    formula = f'[[{location}.{lm["class_id"]}.{lm["code"]}]]'
+                    header = {'id': 0, 'name': 'my_name', 'value': formula}
+                    convert_funs.deep_formula(header, objs, user_id, is_contract)
+                    child_objs = parent_obj[0]['value']
+                    rex(child_objs)
+                    parent_obj.pop(0)
+                    if not child_objs and not lm['method'] in ['n', 'en']:
+                        rex('Ошибка. Некорректно указан код объекта в ЛинкМап<br>')
+                    code = None
+            else:
+                code = None
+        if code:
+            object_manager = ContractCells.objects if is_contract else Objects.objects
+            class_manager = Contracts.objects if is_contract else Designer.objects
+            child_obj = object_manager.filter(parent_structure_id=lm['class_id'], code=code)
+            headers = class_manager.filter(parent_id=lm['class_id'], system=False).values()
+            current_class = class_manager.get(id=lm['class_id'])
+            child_obj = convert_funs2.get_full_object(child_obj, current_class, headers, location)
+            child_objs.append(child_obj)
+        # Вычислим значение параметров - мапирование
+        if lm['method'] != 'n':
+            for p in lm['params']:
+                header = {'id': 0, 'name': 'my_name', 'value': p['value']}
+                convert_funs.deep_formula(header, objs, user_id, True)
+                p['result'] = parent_obj[0]['value']
+                rex(p['result'])
+                parent_obj.pop(0)
+        if lm['method'] in ['n', 'en']:
+            for p in lm['create_params']:
+                header = {'id': 0, 'name': 'my_name', 'value': p['value']}
+                convert_funs.deep_formula(header, objs, user_id, True)
+                p['result'] = parent_obj[0]['value']
+                rex(p['result'])
+                parent_obj.pop(0)
+        params = {'timestamp': timestamp, 'parent_transact': parent_transact}
+
+        def method_new():
+            for p in lm['create_params']:
+                params[str(p['id'])] = p['result']
+            return api_funs.create_object(lm['class_id'], user_id, location, None, *list_contracts, **params)
+
+        def method_edit(child_obj):
+            for p in lm['params']:
+                if p['sign'] == 'e':
+                    val = p['result']
+                elif p['sign'] == '+':
+                    old_val = child_obj[p['id']]['value'] if child_obj[p['id']]['value'] else 0
+                    val = old_val + p['result']
+                else:
+                    old_val = child_obj[p['id']]['value'] if child_obj[p['id']]['value'] else 0
+                    val = old_val - p['result']
+                params[str(p['id'])] = val
+            return api_funs.edit_object(lm['class_id'], child_obj['code'], user_id, location, None, *list_contracts, **params)
+
+        if lm['method'] == 'n':
+            result = method_new()
+            rex(result)
+        elif lm['method'] == 'e':
+            result = method_edit(child_objs[0])
+            rex(result)
+        elif lm['method'] == 'en':
+            if child_objs:
+                result = method_edit(child_objs[0])
+                rex(result)
+            else:
+                result = method_new()
+                rex(result)
+        elif lm['method'] == 'wo':
+            for p in lm['params']:
+                is_wo = False
+                for co in child_objs:
+                    delta = co[p['id']]['value'] - p['result']
+                    prms = params.copy()
+                    if delta >= p['limit']:
+                        prms[str(p['id'])] = delta
+                        is_wo = True
+                    else:
+                        p['result'] -= co[p['id']]['value']
+                        prms[str(p['id'])] = p['limit']
+                    result = api_funs.edit_object(lm['class_id'], co['code'], user_id, location, None, *list_contracts, **prms)
+                    rex(result)
+                    if is_wo:
+                        break
+                if not is_wo and p['value'] > 0:
+                    rex('Ошибка. ЛинкМап не может выполнить списание. На объектах-потомках недостаточно данных<br>')
+
+        # пакетное редактирование
+        else:
+            for co in child_objs:
+                result = method_edit(co)
+                rex(result)
+
+
+# Устарела Удалить после 01.05.2025
+@transaction.atomic()
+def edit_tp(tp_info, tp_data, code, parent_class, parent_headers, timestamp, parent_transact, user_id):
+    user_data = get_user_model().objects.get(id=user_id)
+
+    interface_procedures.save_tp(tp_info, tp_data, code, user_data, timestamp, parent_transact)
+
+    biz_ruls = None; link_map = None; triggers = None
+    for sp in tp_info['system_params']:
+        if sp['name'] == 'business_rule':
+            biz_ruls = deepcopy(sp['value'])
+        elif sp['name'] == 'link_map':
+            link_map = deepcopy(sp['value'])
+        elif sp['name'] == 'trigger':
+            triggers = deepcopy(sp['value'])
+
+    # БиРуЛиМаТры
+    if biz_ruls or link_map or triggers:
+        parent_queryset = ContractCells.objects.filter(parent_structure_id=tp_info['parent_id'], code=code)
+        parent_obj = convert_funs2.get_full_object(parent_queryset, parent_class, parent_headers, 'contract')
+        if biz_ruls:
+            if not contract_procedures.check_tp_biz_rulz(tp_data, biz_ruls, parent_obj, user_id, 'd'):
+                raise Exception(f'Не выполняется бизнес-правило техпроцесса ID: {tp_info["id"]}')
+        if link_map:
+            do_linkmap(link_map, parent_obj, 'd', timestamp, parent_transact, user_id, tp=tp_data['new_stages'])
+        if triggers:
+            if not contract_procedures.check_tp_biz_rulz(tp_data, triggers, parent_obj, user_id, 'd', False):
+                raise Exception(f'Не выполняется триггер техпроцесса ID: {tp_info["id"]}')
+
+
+def do_tp_birulimators(tp_info, parent_class,  parent_headers, code, event_type, tp_data, user_id, timestamp, parent_transact):
+    # 2. Выполняем бирулиматоры
+    biz_ruls = None
+    link_map = None
+    triggers = None
+    for sp in tp_info['system_params']:
+        if sp['name'] == 'business_rule':
+            biz_ruls = deepcopy(sp['value'])
+        elif sp['name'] == 'link_map':
+            link_map = deepcopy(sp['value'])
+        elif sp['name'] == 'trigger':
+            triggers = deepcopy(sp['value'])
+
+    if biz_ruls or link_map or triggers:
+        parent_queryset = ContractCells.objects.filter(parent_structure_id=tp_info['parent_id'], code=code)
+        parent_obj = convert_funs2.get_full_object(parent_queryset, parent_class, parent_headers, 'contract')
+        if biz_ruls:
+            if not contract_procedures.check_tp_biz_rulz(tp_data, biz_ruls, parent_obj, user_id, event_type):
+                raise Exception(f'Не выполняется бизнес-правило техпроцесса ID: {tp_info["id"]}')
+        if link_map:
+            do_linkmap(link_map, parent_obj, event_type, timestamp, parent_transact, user_id, tp=tp_data['new_stages'])
+        if triggers:
+            if not contract_procedures.check_tp_biz_rulz(tp_data, triggers, parent_obj, user_id, event_type, False):
+                raise Exception(f'Не выполняется триггер техпроцесса ID: {tp_info["id"]}')

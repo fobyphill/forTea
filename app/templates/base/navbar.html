@@ -37,7 +37,8 @@
                 ">Контракты</a>
         {% endwith %}
         {# Задачи #}
-        <a class="nav-link{% if request.path == '/tasks' %} active text-bold {% endif %}" href="/tasks">Задачи
+        <a class="nav-link{% if request.path == '/tasks' or request.path == '/manage-tasks' %}
+        active text-bold {% endif %}" href="/tasks">Задачи
             {% if request.session.tasks_quant %}
                 <span {% if request.session.tasks_quant.at %}class="text-warning"{% endif %}>
                     ({{ request.session.tasks_quant.alt }}{% if request.session.tasks_quant.at %}|{{ request.session.tasks_quant.at }}{% endif %})
@@ -50,7 +51,12 @@
                     active text-bold
                 {% endif %}
             ">История</a>
-
+        {# архив #}
+        {% if request.user.is_staff %}
+            <a href="/arhiv" class="nav-link {% if request.path == '/arhiv' %}active text-bold{% endif %}">Архив</a>
+        {% endif %}
+        {# настройки #}
+        <a href="/sets" class="nav-link {% if request.path == '/sets' %}active text-bold{% endif %}">Настройки</a>
     </div>
     {# Правая панель #}
     <div class="navbar-nav ml-auto">

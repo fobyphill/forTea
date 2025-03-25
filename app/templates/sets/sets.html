@@ -1,0 +1,80 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% load my_filters %}
+{% block title %}
+    {{ title }}
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+    .btn-outline-primary:hover {
+        background-color: #195fb2;
+    }
+    </style>
+    <link href="{% static 'webdatarocks/webdatarocks.min.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/constructors/codemirror.js' %}"></script>
+    <script src="{% static 'js/sets.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div>{{ message|linebreaks }}</div>
+    {% endif %}
+
+    <div class="card">
+        <form id="form" method="post">
+            {% csrf_token %}
+            <div class="card-body">
+                <h4><a href="/sets">Настройки</a></h4>
+                <div class="input-group mb-3">
+                    <span class="input-group-text">Главная страница</span>
+                    <input class="form-control" name="i_main_page" value="{{ sets.main_page|default:'' }}">
+                </div>
+                <div class="input-group mb-3">
+                    <span class="input-group-text">Пагинация. Показывать по</span>
+                    <select class="form-control" name="i_pagination">
+                    {% with '10 20 50 100' as list %}
+                        {% for i in list.split %}
+                            <option value="{{ i }}" {% if i == sets.pagination|slugify %}selected{% endif %}>{{ i }}</option>
+                        {% endfor %}
+                    {% endwith %}
+                    </select>
+                    <span class="input-group-text">страниц</span>
+                </div>
+                {% if request.user.is_superuser and request.user.is_staff %}
+                    <h4>Константы главной страницы</h4>
+                    <h5>
+                        Для авторизированных пользователей
+                        <button class="btn-outline-primary btn" onclick="add_const(this, 'on')" type="button">+</button></h5>
+                    <table class="table table-hover table-responsive-md table_sort w-100" id="table_on">
+                    {% for mpon in main_page_on %}
+                        <tr class="row">
+                            <td class="col-2"><textarea class="form-control" name="ta_name_{{ mpon.id }}">{{ mpon.name }}</textarea>
+                            <td class="col"><textarea class="form-control" name="ta_value_{{ mpon.id }}">{{ mpon.value|safe }}</textarea></td>
+                            <td class="col-1"><button class="btn btn-danger" name="b_delete_{{ mpon.id }}">Удалить</button></td>
+                        </tr>
+                    {% endfor %}
+                    </table>
+                    <h5>
+                        Для неавторизированных пользователей
+                        <button class="btn-outline-primary btn" onclick="add_const(this, 'off')" type="button">+</button>
+                    </h5>
+                    <table class="table table-hover table-responsive-md table_sort w-100" id="table_off">
+                    {% for mpof in main_page_off %}
+                        <tr class="row">
+                            <td class="col-2"><textarea class="form-control" name="ta_name_{{ mpof.id }}">{{ mpof.name }}</textarea>
+                            <td class="col"><textarea class="form-control" name="ta_value_{{ mpof.id }}"
+                            >{{ mpof.value|safe }}</textarea></td>
+                            <td class="col-1"><button class="btn btn-danger" name="b_delete_{{ mpof.id }}">Удалить</button></td>
+                        </tr>
+                    {% endfor %}
+                    </table>
+                {% endif %}
+                <button class="btn my-base-button" type="submit" name="b_save">Сохранить</button>
+            </div>
+        </form>
+    </div>
+{% endblock %}

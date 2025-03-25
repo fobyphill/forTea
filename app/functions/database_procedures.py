@@ -60,6 +60,6 @@ def check_fix_priority(params_4_order, type):
 
 
 def check_user(user_id):
-    User = get_user_model()
-    user = User.objects.filter(id=user_id).values()
-    return user if user else False
+    if user_id == 0:
+        return True
+    return bool(get_user_model().objects.filter(id=user_id).values())

@@ -1,5 +1,7 @@
 import math
 import operator
+import re
+import time as tm
 from datetime import datetime, time, date
 from functools import reduce
 
@@ -15,20 +17,19 @@ from django.views.decorators.csrf import csrf_exempt
 
 from app.functions import convert_procedures, convert_funs, interface_funs, tree_funs, common_funs, view_procedures, \
     api_funs, session_funs, ajax_funs_2, ajax_funs, database_funs, parse_funs, update_funs, task_funs, api_funs2, \
-    convert_funs2
+    convert_funs2, temp_funs, class_funs, hist_funs
 from app.functions.api_funs import get_object_list
 from app.models import RegName, Objects, Designer, Contracts, RegistratorLog, ContractCells, TablesCodes, Dictionary, \
-    TechProcessObjects, TechProcess, OtherCodes, Tasks, DictObjects
+    TechProcessObjects, TechProcess, OtherCodes, Tasks, DictObjects, ObjectsTransactIds, TaskClasses
 import pandas as pd
 from django.db.models.functions import Upper
 
 
 @view_procedures.is_auth_app
 def tests(request):
-    date_from = datetime(2000, 1, 1)
-    my_objs = api_funs2.get_object_hist(258, 4, date_from)
-    return HttpResponse(str(my_objs))
-
+    update_funs.run_delays()
+    result = 'ok'
+    return HttpResponse(result)
 
 def tests_template(request):
     return render(request, 'common/graph-tests.html')
@@ -36,6 +37,5 @@ def tests_template(request):
 
 @csrf_exempt
 def upload_file(request):
-    aaa = 888
     return HttpResponse('получилось')
 

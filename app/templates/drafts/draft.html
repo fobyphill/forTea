@@ -166,8 +166,7 @@
                             </div>
                         {% endif %}
 
-                    {% for h in headers %}
-                        {% if h.formula != 'array' %}
+                        {% for h in headers %}
                             <div class="input-group mb-3">
                                 <span class="input-group-text">
                                     <a target="_blank" id="a_label_{{ h.id }}">
@@ -252,48 +251,48 @@
                                           style="min-height: 1rem; height: auto"></textarea>
                             {% endif %}
                             </div>
-                        {% else %}
-            {# модальное окно с табличной частью черновика #}
-            <div class="modal fade" id="modal_array{{ h.id }}" tabindex="-1" role="dialog" aria-labelledby="myModalLabel"
-                 aria-hidden="true">
-                <div class="modal-dialog modal-xl">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
-                        </div>
-                        <div class="modal-body" style="padding: 0">
-                            <iframe id="iframe_{{ h.id }}" width="100%" height="600" scrolling="yes" loading="lazy"
-                                sandbox="allow-same-origin allow-modals allow-scripts allow-forms" frameborder="0"
-                            src="{{ request.path }}?class_id={{ h.id }}&owner=">
-                            </iframe>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-default" name="close-btn"
-                                onclick="send_form_with_param()" data-dismiss="modal">Закрыть</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                            {% include 'contracts/manage_tps.html' %}
+                        {% endfor %}
+                        {% for a in request.session.temp_object_manager.arrays %}
+                            {# модальное окно с табличной частью черновика #}
+                            <div class="modal fade" id="modal_array{{ a.id }}" tabindex="-1" role="dialog" aria-labelledby="myModalLabel"
+                                 aria-hidden="true">
+                                <div class="modal-dialog modal-xl">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                                        </div>
+                                        <div class="modal-body" style="padding: 0">
+                                            <iframe id="iframe_{{ a.id }}" width="100%" height="600" scrolling="yes" loading="lazy"
+                                                sandbox="allow-same-origin allow-modals allow-scripts allow-forms" frameborder="0"
+                                            src="{{ request.path }}?class_id={{ a.id }}&owner=">
+                                            </iframe>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-default" name="close-btn"
+                                                onclick="send_form_with_param()" data-dismiss="modal">Закрыть</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             {# Массивы #}
                             <div style="margin: 0 0 -0.5rem 0.5rem; z-index: 5">
                                 <span class="badge label-prop-name">
-                                    <a target="_blank" href="{{ request.path }}?class_id={{ h.id }}&input_owner=" id="a_array_{{ h.id }}">
+                                    <a target="_blank" href="{{ request.path }}?class_id={{ a.id }}&input_owner=" id="a_array_{{ a.id }}">
                                         {{ h.name }}
                                     </a>
                                 </span>
-                                <button class="badge label-prop-name" style="border: 0" data-toggle="modal" data-target="#modal_array{{ h.id }}"
+                                <button class="badge label-prop-name" style="border: 0" data-toggle="modal" data-target="#modal_array{{ a.id }}"
                                 type="button">Редактировать</button>
                             </div>
                             {# таблица массива #}
                             <div style="border: 1px solid #ced4da; border-radius: 0.25rem;" class="mb-3">
-                                <div id="div_table_slave_{{ h.id }}">
+                                <div id="div_table_slave_{{ a.id }}">
                                     {% include 'objects/array-table.html' %}
-                                    <input class="tag-invis" id="i_slave_{{ h.id }}" name="i_slave_{{ h.id }}">
+                                    <input class="tag-invis" id="i_slave_{{ a.id }}" name="i_slave_{{ a.id }}">
                                 </div>
                             </div>
-                        {% endif %}
-                        {% include 'contracts/manage_tps.html' %}
-                    {% endfor %}
+                        {% endfor %}
                         {% include 'objects/dict-in-object.html' %}
                         {# отправить черновик другому пользователю #}
                         <div class="input-group mb-3">

@@ -6,10 +6,9 @@ from django.db.models import Sum, Q, FloatField, QuerySet, OuterRef, Subquery, A
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast
 from django.forms import model_to_dict
-import app.functions.tree_funs
-import app.functions.tree_procedures
-from app.functions import convert_procedures, files_procedures, tree_funs, hist_funs, api_funs2, object_funs
-from app.models import Designer, Objects, Contracts, ContractCells, DictObjects, RegistratorLog, TechProcessObjects
+from app.functions import convert_procedures, files_procedures, tree_funs, hist_funs, api_funs2, object_funs, tech_procs
+from app.models import Designer, Objects, Contracts, ContractCells, DictObjects, RegistratorLog, TechProcessObjects, \
+    TechProcess
 from app.other.global_vars import is_mysql
 
 
@@ -18,20 +17,21 @@ from app.other.global_vars import is_mysql
 # Массив должен быть упорядоченным по  code, name_id
 # Выход - стандартный список словарей
 def queryset_to_object(objects):
+    result_json = []
     if objects:
         name_code = 'code' if hasattr(objects[0], 'code') else 'parent_code'
         objects = objects.order_by(name_code, 'name_id')
-    result_json = []
-    for o in objects:
-        code = o.code if hasattr(o, 'code') else o.parent_code
-        try:
-            dict = next(rj for rj in result_json if rj['code'] == code)
-        except StopIteration:
-            dict = {'code': code, 'parent_structure': o.parent_structure_id, 'type': o.parent_structure.formula}
-            result_json.append(dict)
-        dict[o.name_id] = {'id': o.id, 'name': o.name.name, 'type': o.name.formula, 'value': o.value}
-        if hasattr(o, 'delay'):
-            dict[o.name_id]['delay'] = o.delay
+        code = objects[0].code if hasattr(objects[0], 'code') else objects[0].parent_code
+        my_dict = {'code': code, 'parent_structure': objects[0].parent_structure_id, 'type': objects[0].parent_structure.formula}
+        for o in objects:
+            code = o.code if hasattr(o, 'code') else o.parent_code
+            if code != my_dict['code']:
+                result_json.append(my_dict)
+                my_dict = {'code': code, 'parent_structure': o.parent_structure_id, 'type': o.parent_structure.formula}
+            my_dict[o.name_id] = {'id': o.id, 'name': o.name.name, 'formula': o.name.formula, 'value': o.value}
+            if hasattr(o, 'delay'):
+                my_dict[o.name_id]['delay'] = o.delay
+        result_json.append(my_dict)
     return result_json
 
 
@@ -127,7 +127,8 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                 var = int(var)
             except:
                 return 'Ошибка. Некорректно указан адрес ссылки'
-            else:
+
+            if not var in object or not object[var] or object[var]['formula'] == 'file':
                 try:
                     if is_contract:
                         deep_header = Contracts.objects.filter(id=var).values()[0]
@@ -135,25 +136,37 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                         deep_header = Designer.objects.filter(id=var).values()[0]
                 except:
                     return 'Ошибка. Некорректно указан путь к объекту'
-
-            if not var in object or not object[var]:
                 res = add_param_to_object(deep_header, object, var, user_id, is_contract, is_draft, *link_chain)
                 if res != 'ok':
                     return res
+            else:
+                deep_header = dict()
 
-            if deep_header['formula'] == 'const':
+            if object[var]['formula'] == 'const':
                 if value_type == 'fact':
-                    alias_id = object[deep_header['id']]['value']
+                    alias_id = object[var]['value']
                 elif value_type == 'delay':
-                    alias_id = object[deep_header['id']]['delay'][-1]['value'] if 'delay' in object[deep_header['id']]\
-                        and object[deep_header['id']]['delay'] else None
+                    alias_id = object[var]['delay'][-1]['value'] if 'delay' in object[var]\
+                        and object[var]['delay'] else None
                 else:
-                    alias_id = object[deep_header['id']]['delay'][-1]['value'] if 'delay' in object[deep_header['id']]\
-                        and object[deep_header['id']]['delay'] else object[deep_header['id']]['value']
+                    alias_id = object[var]['delay'][-1]['value'] if 'delay' in object[var]\
+                        and object[var]['delay'] else object[var]['value']
                 val = Contracts.objects.get(id=alias_id).value if is_contract else Designer.objects.get(id=alias_id).value
                 return static_formula(val, user_id, *link_chain)
-            elif deep_header['formula'] == 'float':
-                if value_type == 'fact':
+            elif object[var]['formula'] == 'float':
+                if value_type == 'delta':
+                    loc = 'contract' if is_contract else 'table'
+                    last_hist = RegistratorLog.objects.filter(json_class=object['parent_structure'],
+                                                              json__code=object['code'], json__location=loc, json__name=var,
+                                                              json__type=object['type'], reg_name_id__in=(13, 15))\
+                    .order_by('-id')[:1]
+                    if not last_hist:
+                        val = object[var]['value']
+                    else:
+                        last_val = last_hist[0].json['value'] if last_hist[0].json['value'] else 0
+                        prev_val = last_hist[0].json_income['value'] if last_hist[0].json_income and last_hist[0].json_income['value'] else 0
+                        val = last_val - prev_val
+                elif value_type == 'fact':
                     val = object[var]['value']
                 elif value_type == 'delay':
                     val = sum([d['value'] for d in object[var]['delay']]) if 'delay' in object[var] and object[var]['delay'] else 0
@@ -162,9 +175,9 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                     if 'delay' in object[var] and object[var]['delay']:
                         val += sum([d['value'] for d in object[var]['delay']])
                 return val
-            elif deep_header['formula'] == 'eval':
+            elif object[var]['formula'] == 'eval':
                 return object[var]['value']
-            elif deep_header['formula'] in ['string', 'date', 'datetime', 'enum', 'bool', 'link']:
+            elif object[var]['formula'] in ['string', 'date', 'datetime', 'enum', 'bool', 'link']:
                 if value_type == 'fact':
                     val = object[var]['value']
                 elif value_type in 'delay':
@@ -173,7 +186,7 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                     val = object[var]['delay'][-1]['value'] if 'delay' in object[var] and object[var]['delay'] else \
                     object[var]['value']
                 return val
-            elif deep_header['formula'] == 'file':
+            elif object[var]['formula'] == 'file':
                 location = 'contract' if is_contract else 'table'
                 if value_type == 'fact':
                     val = object[var]['value']
@@ -224,29 +237,87 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
     def get_tp(obj, array, **opt_params):
         if len(array) != 4:
             return 'Ошибка. Некорректно задана формула техпроцесса'
-        tp_id = int(array[1])
-        code = int(array[2])
-        name_id = int(array[3])
-        data_kind = opt_params['type_value']
-        if 'tps' in obj and obj['tps'] and obj['tps'] and tp_id in obj['tps'] and name_id in obj['tps'][tp_id]:
-            my_tp = obj['tps'][tp_id][name_id]
-            return my_tp[data_kind]
-        else:
-            try:
-                my_tp = TechProcessObjects.objects.get(parent_structure_id=tp_id, name_id=name_id, parent_code=code)
-            except ObjectDoesNotExist:
-                return 'Ошибка. Данные техпроцесса некорректны. Не найден объект'
-            if data_kind == 'fact':
-                return my_tp.value['fact']
-            elif data_kind == 'delay':
-                return sum(d['value'] for d in my_tp.value['delay'])
-            else:
-                fact = my_tp.value['fact'] if my_tp.value['fact'] else 0
-                return sum(d['value'] for d in my_tp.value['delay']) + fact
+        try:
+            tp_id = int(array[1])
+        except ValueError:
+            return 'Ошибка. Некорректно задан ID техпроцесса. Укажите целое число'
+        try:
+            name_id = int(array[3])
+        except ValueError:
+            return 'Ошибка. Некорректно задан ID заголовка техпроцесса. Укажите целое число'
 
+        try:
+            code = int(array[2])
+        except ValueError:
+            code = array[2]
+            # Массив данных с агрегацией
+            all_codes = TechProcessObjects.objects.filter(parent_structure_id=tp_id).values('parent_code').distinct()
+            list_results = []
+            agr_fun = opt_params['agr_fun'] if 'agr_fun' in opt_params else 'sum'
+            if code.lower() == 'all':
+                for ac in all_codes:
+                    obj_param = TechProcessObjects.objects.filter(name_id=name_id, parent_code=ac['parent_code'])
+                    val = convert_procedures.ravaltonum(obj_param[0].value, opt_params['type_value']) if obj_param else 0
+                    list_results.append(val)
+                return convert_procedures.do_agr_fun(agr_fun, list_results)
+            elif code[0] == 'f':
+                match_conds = re.findall(r'\d+[gtelqn]{2}\d+(?:(?:[.,]{1}\d+)|)', code)
+                try:
+                    list_conds = []
+                    for mc in match_conds:
+                        match_cond = re.match(r'(\d+)(\w{2})(.+)', mc)
+                        dict_cond = {'field_id': int(match_cond[1]), 'sign': match_cond[2], 'cmp_val': float(match_cond[3])}
+                        list_conds.append(dict_cond)
+                except:
+                    return 'Ошибка. Некорректно задан фильтр объектов для техпроцесса'
+                if not list_conds:
+                    return 'Ошибка. Некорректно задан фильтр объектов для техпроцесса'
+                logic_sign = opt_params['logical_sign'] if 'logical_sign' in opt_params else 'and'
+                list_results = []
+                for ac in all_codes:
+                    dict_params = dict()
+                    cmp_done = logic_sign == 'and'
+                    for lc in list_conds:
+                        if lc['field_id'] in dict_params:
+                            val = dict_params[lc['field_id']]
+                        else:
+                            obj_param = TechProcessObjects.objects.filter(name_id=lc['field_id'], parent_code=ac['parent_code'])
+                            val = convert_procedures.ravaltonum(obj_param[0].value, opt_params['type_value']) if obj_param else 0
+                            dict_params[lc['field_id']] = val
+                        cmp_res = convert_procedures.do_logical_compare(val, lc['sign'], lc['cmp_val'])
+                        if cmp_res and logic_sign == 'or' or not cmp_res and logic_sign == 'and':
+                            cmp_done = cmp_res
+                            break
+                    if cmp_done:
+                        if name_id in dict_params:
+                            val = dict_params[name_id]
+                        else:
+                            obj_param = TechProcessObjects.objects.filter(name_id=name_id, parent_code=ac['parent_code'])
+                            val = convert_procedures.ravaltonum(obj_param[0].value, opt_params['type_value']) if obj_param else 0
+                            dict_params[name_id] = val
+                        list_results.append(val)
+                return convert_procedures.do_agr_fun(agr_fun, list_results)
+
+        else:
+            if 'tps' in obj and obj['tps'] and tp_id in obj['tps'] and name_id in obj['tps'][tp_id]:
+                my_tp = obj['tps'][tp_id][name_id]
+                return my_tp[opt_params['type_value']]
+            else:
+                try:
+                    my_tp = TechProcessObjects.objects.get(parent_structure_id=tp_id, name_id=name_id, parent_code=code)
+                except ObjectDoesNotExist:
+                    return 'Ошибка. Данные техпроцесса некорректны. Не найден объект'
+                if opt_params['type_value'] == 'fact':
+                    return my_tp.value['fact']
+                elif opt_params['type_value'] == 'delay':
+                    return sum(d['value'] for d in my_tp.value['delay'])
+                else:
+                    fact = my_tp.value['fact'] if my_tp.value['fact'] else 0
+                    return sum(d['value'] for d in my_tp.value['delay']) + fact
 
     # Получим все переменные в виде списка словарей
     dict_foreign_formuls = {}
+
     for o in objects:
         # Если поле еще не было вычислено, вычислим. В противном случае - игнорим
         if not header['id'] in o:
@@ -270,13 +341,15 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                 while re.search(r'\[\[', formula):
                     # Защита от вечного цикла
                     if control_sum_operations >= quan_quots:
-                        formula = 'result = \'Ошибка. Некорректно задана формула\''
                         break
                     json_vars = convert_procedures.retreive_tags(formula)
                     for jv in json_vars:
                         k = list(jv.keys())[0]
                         v = list(jv.values())[0]
-
+                        if not v:
+                            continue
+                        if not re.search(r'[[\s*' + k + '\s*]]', formula, re.DOTALL):
+                            continue
                         value_var = convert_procedures.userdata_to_interface(header, o['code'], is_contract, False)
                         if value_var:
                             formula = 'result = \'' + value_var + '\''
@@ -342,6 +415,25 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                                     parent_branch = parent_branch[0]
                                     if parent_branch.value:
                                         value_var = tree_funs.glwt(header['parent_id'], parent_branch.value, is_contract)
+                        # Маркер code
+                        elif re.match(r'\s*code\s*', k):
+                            value_var = o['code']
+                        # Маркеры handler date_create is_done
+                        elif re.match(r'\s*(?:handler|datetime_create|is_done)\s*', k):
+                            if is_contract:
+                                marker_name = re.match(r'\s*(handler|datetime_create|is_done)\s*', k)[1]
+                                value_var = next(ov['value'][marker_name] for ov in o.values() if type(ov) is dict and
+                                                 ov['name'] == 'system_data')
+                            else:
+                                value_var = ''
+                        # Маркеры today & now
+                        elif re.match(r'\s*(?:today|now)\s*', k):
+                            today = da_ti.datetime.today()
+                            if re.match(r'\s*today\s*', k):
+                                dat_format = '%Y-%m-%d'
+                            else:
+                                dat_format = '%Y-%m-%dT%H:%M:%S'
+                            value_var = da_ti.datetime.strftime(today, dat_format)
                         # Если имеем дело с техпроцессом
                         elif v[0].lower() == 'tp':
                             value_var = get_tp(o, v, **opt_params)
@@ -356,11 +448,10 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                             for i in range(len(v)):
                                 if i < len(v) - 1:
                                     deep_object, is_link_contract = link_var(deep_object, v[i], is_link_contract)
+                                elif type(deep_object) is dict:
+                                    value_var = last_var(deep_object, v[i], opt_params['type_value'], is_link_contract)
                                 else:
-                                    if type(deep_object) is dict:
-                                        value_var = last_var(deep_object, v[i], opt_params['type_value'], is_link_contract)
-                                    else:
-                                        value_var = 'Ошибка. Ссылка некорректна'
+                                    value_var = 'Ошибка. Ссылка некорректна'
 
                         if type(value_var) is str:
                             value_var = re.sub(r'\'', '\"', value_var)
@@ -373,8 +464,6 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                         elif type(value_var) is list:
                             value_var = str(value_var) if value_var else '[]'
                             value_var = value_var.replace('[[', '[ [').replace(']]', '] ]')
-                        elif not value_var:
-                            value_var = '0'
                         else:   value_var = str(value_var)
                         escaped_k = convert_procedures.scfre(k)  # экранирование строки с формулой
                         formula = re.sub(r'\[\[' + escaped_k + r'\]\]', str(value_var), formula, re.S)
@@ -389,40 +478,15 @@ def deep_formula(header, objects, user_id, is_contract=False, *link_chain, **par
                 # Защита от кверисета
                 if isinstance(r, QuerySet):
                     r = list(r.values())
-            o[header['id']] = {'name': header['name'], 'type': 'eval', 'value': r}
+            o[header['id']] = {'name': header['name'], 'formula': 'eval', 'value': r}
 
 
 def static_formula(formula, user_id, *link_chain, **params):
-    # Обработка опциональных параметров
-    is_draft = True if 'is_draft' in params and params['is_draft'] else False
-    # Получим все переменные в виде списка словарей
-    json_vars = convert_procedures.retreive_tags(formula)
-    if not re.search('result[\s+|]=', formula):
-        formula = 'result = ' + formula
-    for jv in json_vars:
-        k = list(jv.keys())[0]
-        v = list(jv.values())[0]
-        opt_params = get_opt_params(k)  # получим опциональные параметры
-        opt_params['value_type'] = v.pop()
-        value_var = wwh(k, v, None, False, user_id, opt_params, *link_chain, **params)
-        if not value_var:
-            value_var = foreign_link(v, user_id, *link_chain, is_draft=is_draft, **opt_params)
-        if type(value_var) is str:
-            value_var = '\'' + value_var + '\''
-        else:   value_var = str(value_var)
-        k = convert_procedures.scfre(k)
-        formula = re.sub('\[\[' + k + '\]\]', value_var, formula)
-        formula = condition(formula)  # Выполним блок условий
-    try:
-        loc = {'result': None}
-        exec(formula, {}, loc)
-        r = loc['result']
-    except Exception as ex:
-        r = '\'Ошибка: ' + str(ex) + '\''
-    else:
-        if isinstance(r, QuerySet):
-            r = list(r.values())
-    return r
+    obj = {'code': 1}
+    header = {'id': 0, 'value': formula, 'name': 'my_name'}
+    is_contract = formula[0].lower() == 'c'
+    deep_formula(header, [obj], user_id, is_contract, *link_chain, **params)
+    return obj[0]['value']
 
 
 # Преобразование классов-папок в структуру-джейсон-матрешку дочерние классы и папки кладутся в родительские
@@ -479,36 +543,6 @@ def prepare_table_to_template(headers, objects, user_id, is_contract=False, **pa
         # для формул
         elif h['formula'] == 'eval':
             deep_formula(h, objects, user_id, is_contract, **params)
-        # для массивов
-        elif h['formula'] == 'array':
-            owners = [o['code'] for o in objects]
-            class_manager = Contracts.objects if is_contract else Designer.objects
-            headers_array = list(class_manager.filter(parent_id=h['id']).order_by('priority').values())
-            headers_ids = []
-            vis_headers_array = []
-            header_owner = None
-            for ha in headers_array:
-                if ha['name'] == 'Собственник':
-                    header_owner = ha
-                    headers_ids.append(ha['id'])
-                    vis_headers_array.append(ha)
-                if ha['is_visible']:
-                    convert_procedures.ficoitch(ha)
-                    headers_ids.append(ha['id'])
-                    vis_headers_array.append(ha)
-                if len(vis_headers_array) >= 6:
-                    break
-            object_manager = ContractCells.objects if is_contract else Objects.objects
-            array_codes = object_manager.filter(parent_structure_id=h['id'], name_id=header_owner['id'],
-                                                value__in=owners).values('code')
-            array_children = object_manager.filter(parent_structure_id=h['id'], code__in=Subquery(array_codes),
-                                                   name_id__in=headers_ids)
-            array_children = queryset_to_object(array_children)
-            for o in objects:
-                o[h['id']] = {}
-                o[h['id']]['objects'] = [ac for ac in array_children if o['code'] == int(ac[header_owner['id']]['value'])]
-                o[h['id']]['headers'] = vis_headers_array
-                prepare_table_to_template(headers_array, o[h['id']]['objects'], user_id, is_contract)
 
 
 # добавим в массив словари
@@ -808,7 +842,18 @@ def foreign_link(array, user_id, *link_chain, **params):
                 object = object[0]
                 fact = object.value
                 if cell_type['formula'] == 'float':
-                    delay = sum([d['value'] for d in object.delay]) if object.delay else 0
+                    if params['type_value'] == 'delta':
+                        last_hist = RegistratorLog.objects.filter(json_class=parent_structure_id, json__code=code,
+                                                                  json__name=name_id, json__location=array[0],
+                                                                  json__type=current_class.formula, reg_name_id__in=(13, 15))\
+                        .order_by('-id')[:1]
+                        # Здесь делэй на самом деле предыдущее значение параметра. Решил не создавать лишней переменной
+                        if last_hist and last_hist[0].json_income and last_hist[0].json_income['value']:
+                            delay = last_hist[0].json_income['value']
+                        else:
+                            delay = 0
+                    else:
+                        delay = sum([d['value'] for d in object.delay]) if object.delay else 0
                 else:
                     delay = sorted(object.delay, key=lambda x: x['date_update'])[0]['value'] if object.delay else None
             else:
@@ -822,13 +867,16 @@ def foreign_link(array, user_id, *link_chain, **params):
                     delay = 0 if cell_type['formula'] == 'float' else None
             if params['type_value'] == 'fact':
                 val = fact
-            elif params['type_value'] == 'state':
+            elif params['type_value'] == 'delay':
+                val = delay
+            else:
                 if cell_type['formula'] == 'float':
-                    val = fact + delay
+                    if params['type_value'] == 'delta':
+                        val = fact - delay  # делэй здесь - предыдущее значение параметра
+                    else:
+                        val = fact + delay
                 else:
                     val = delay if delay else fact
-            else:
-                val = delay
             return val
         # для агрегации нескольких объектов
         else:
@@ -1072,6 +1120,11 @@ def foreign_link(array, user_id, *link_chain, **params):
                     if convert_procedures.foblc(ao, tom['headers'], array_conds, logical_sign):
                         objects.append(ao)
             else:
+                # Если вычисляем в рамках одной ветки - получаем список кодов объектов в данном ветке
+                if params['node']:
+                    source_codes = convert_procedures.gc1b(current_class, params['code'], params['node'], is_contract)
+                else:
+                    source_codes = []
                 total_codes = get_filtered_array()
                 if type(total_codes) is str and total_codes.lower()[:6] == 'ошибка':
                     return total_codes
@@ -1094,15 +1147,18 @@ def foreign_link(array, user_id, *link_chain, **params):
             except ValueError:
                 return 'Ошибка. Некорректно задана формула'
             try:
-                header = head_manager.get(id=parent_structure_id)
-                const = head_manager.get(parent_id=parent_structure_id, id=const_id)
+                const = head_manager.filter(parent_id=parent_structure_id, id=const_id).values()[0]
             except:
                 return 'Ошибка. Некорректно задан адрес статической ссылки'
 
-            if header.formula != 'alias' or const.formula != 'eval':
+            if const['formula'] != 'eval':
                return 'Ошибка. Некорректно задан адрес статической ссылки'
             else:
-               return static_formula(const.value, user_id, *link_chain, **params)
+                obj = {'code': 0}
+                objs = [obj]
+                is_contract = const['value'][0].lower() == 'c'
+                deep_formula(const, objs, user_id, is_contract, *link_chain, **params)
+                return obj[const['id']]['value']
 
 
 # work with history - работаем с историей. Если находит опциональные параметры, говорящие о работе в истории - возвращает значение.
@@ -1127,7 +1183,7 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
             if not timestamp:
                 return 'Ошибка. Некорректно указано значение параметра version'
         # Попытаемся достать параметр из истории
-        name_id = None; formula = None
+        formula = None
         if param_name == 'version_number':
             q_date_update = ~Q()
             res_slice = int(version_value)
@@ -1136,18 +1192,20 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
             res_slice = 0
 
         # Если формула - внешняя ссылка
-        if v[0] in ('table', 'contract'):
-            location = v[0]
+        name_id = 0
+        if v[0] in ('table', 'contract', 'tp'):
             try:
                 class_id = int(v[1])
             except ValueError:
                 return 'Ошибка. Формула задана с ошибкой. Укажите корректный ID класса'
-            header = Designer.objects if location == 'table' else Contracts.objects
+            header = Designer.objects if v[0] == 'table' else Contracts.objects if v[0] == 'contract' else TechProcess.objects
+            location = 'contract' if v[0] == 'tp' else v[0]
             class_header = header.filter(id=class_id)
             if class_header:
                 class_header = class_header[0]
             else:
                 return 'Ошибка. Некорректно указан ID класса в формуле ' + k
+            formula = class_header.formula
             # Для полной ссылки
             if len(v) == 4:
                 try:
@@ -1164,7 +1222,7 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
                     code = int(v[2])
                 except ValueError:
                     code = v[2]
-                    conds_sum = re.match(r'^f\d+[eqgtln]{2}.+', code)
+                    conds_sum = re.match(r'^f\d+[eqgtlnk]{2}.+', code)
                     agr_fun = opt_params['agr_fun'] if 'agr_fun' in opt_params else 'sum'
                     agr_funs_types = {'string': ('count', ), 'bool': ('count', ), 'link': ('count', ), 'eval': [],
                                       'float': ('count', 'sum', 'avg', 'max', 'min'), 'enum': ('count', ),
@@ -1177,20 +1235,26 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
                         return 'Ошибка. Не имеет смысла суммировать разные версии объектов'
 
                     base_query = RegistratorLog.objects.filter(json_class=class_id)
+
                     def get_work_codes():
                         # соберем коды объектов, которые на момент даты версии удалены
-                        delete_codes = base_query.filter(reg_name=8, json_income__location=location,
-                                                         date_update__lt=timestamp) \
+                        delete_codes = base_query.filter(json_income__type=formula, reg_name_id=16,
+                                                         json_income__location=location, date_update__lt=timestamp) \
                             .annotate(code=F('json_income__code')).values('code').distinct()
                         delete_codes = [dc['code'] for dc in delete_codes]
-                        exist_codes = list(
-                            base_query.filter(date_update__lt=timestamp, json__location=location, reg_name__in=(13, 15)) \
+                        exist_codes = list(base_query.filter(date_update__lt=timestamp, json__location=location,
+                                                             reg_name__in=(13, 15)) \
                             .annotate(code=F('json__code')).values('code').distinct().exclude(code__in=delete_codes))
 
                         # для версии после
                         if is_after:
-                            future_codes = list(
-                                base_query.filter(reg_name=5, json__location=location, date_update__gt=timestamp) \
+                            if formula == 'tp':
+                                future_base = RegistratorLog.objects.filter(json_class=class_header.parent_id,
+                                                                            json__location='contract',
+                                                                            json__type__in=('contract', 'array'))
+                            else:
+                                future_base = base_query
+                            future_codes = list(future_base.filter(reg_name=5, json__location=location, date_update__gt=timestamp) \
                                 .annotate(code=F('json__code')).values('code'))
                         else:
                             future_codes = []
@@ -1214,432 +1278,76 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
                         exist_codes = get_work_codes()
                         exist_values = []
                         for ec in exist_codes:
-                            exist_values.append(convert_procedures.renepreva(base_query, ec['code'], timestamp,
-                            is_after, location, name_id, data_type))
+                            exist_values.append(convert_procedures.renepreva(base_query.filter(json__type=formula),
+                                                 ec['code'], timestamp, is_after, formula, location, name_id, data_type))
+                        if formula == 'tp':
+                            counter = 0
+                            while counter < len(exist_values):
+                                if exist_values[counter]:
+                                    exist_values[counter] = convert_procedures.ravaltonum(exist_values[counter], opt_params['type_value'])
+                                counter += 1
                         return convert_procedures.do_agr_fun(agr_fun, exist_values)
 
                     # Накопление суммы с условием
                     elif conds_sum:
+                        logic_sign = opt_params['logical_sign'] if 'logical_sign' in opt_params else 'and'
                         exist_codes = get_work_codes()
                         if not exist_codes:
                             return 0
                         str_date = opt_params['version_after'] if is_after else opt_params['version']
-                        is_c = location == 'contract'
-                        exist_codes = [ec['code'] for ec in exist_codes]
-                        exist_objs, tom = convert_procedures.gvfo(class_id, str_date, is_c, is_after, user_id, exist_codes)
-                        array_conds = convert_procedures.gaoc(code)
-                        logic_sign = opt_params['logical_sign'] if 'logical_sign' in opt_params else 'and'
-                        exist_values = []
-                        for eo in exist_objs:
-                            if convert_procedures.foblc(eo, tom['headers'], array_conds, logic_sign):
-                                if eo[name_id]['value']:
-                                    val = eo[name_id]['value']
-                                else:
-                                    val = 0 if name_header['formula'] == 'float' else ''
-                                exist_values.append(val)
-                        return convert_procedures.do_agr_fun(agr_fun, exist_values)
+                        if formula == 'tp':
+                            match_conds = re.findall(r'\d+[gtenlk]{2}\d+(?:(?:[.,]{1}\d+)|)', code)
+                            list_conds = []
+                            for mc in match_conds:
+                                match_cond = re.match(r'(\d+)([gtenkl]{2})(.+)', mc)
+                                dict_cond = {'field_id': int(match_cond[1]), 'sign': match_cond[2],
+                                             'cmp_val': float(match_cond[3].replace(',', '.'))}
+                                list_conds.append(dict_cond)
+                            exist_values = []
+                            for ec in exist_codes:
+                                op_cmp = logic_sign == 'and'
+                                dict_obj = dict()
+                                for lc in list_conds:
+                                    val_raw = convert_procedures.renepreva(base_query.filter(json__type=formula),
+                                                                           ec['code'], timestamp, is_after, formula,
+                                                                           location, lc['field_id'], 'float')
+                                    vaL_num = convert_procedures.ravaltonum(val_raw, opt_params['type_value'])
+                                    dict_obj[lc['field_id']] = vaL_num
+                                    cond_res = convert_procedures.fitoop(vaL_num, lc['sign'], lc['cmp_val'])
+                                    if cond_res and logic_sign == 'or' or not cond_res and logic_sign == 'and':
+                                        op_cmp = cond_res
+                                        break
+                                if op_cmp:
+                                    if name_id in dict_obj:
+                                        exist_values.append(dict_obj[name_id])
+                                    else:
+                                        val_raw = convert_procedures.renepreva(base_query.filter(json__type=formula),
+                                                                               ec['code'], timestamp, is_after, formula,
+                                                                               location, name_id, 'float')
+                                        vaL_num = convert_procedures.ravaltonum(val_raw, opt_params['type_value'])
+                                        exist_values.append(vaL_num)
+                            return convert_procedures.do_agr_fun(agr_fun, exist_values)
+                        else:
+                            is_c = location == 'contract'
+                            exist_codes = [ec['code'] for ec in exist_codes]
+                            exist_objs, tom = convert_procedures.gvfo(class_id, str_date, is_c, is_after, user_id, exist_codes)
+                            array_conds = convert_procedures.gaoc(code)
+                            exist_values = []
+                            for eo in exist_objs:
+                                if convert_procedures.foblc(eo, tom['headers'], array_conds, logic_sign):
+                                    if eo[name_id]['value']:
+                                        val = eo[name_id]['value']
+                                    else:
+                                        val = 0 if name_header['formula'] == 'float' else ''
+                                    exist_values.append(val)
+                            return convert_procedures.do_agr_fun(agr_fun, exist_values)
 
-
-                        # старые мэмы
-                        # try:
-                        #     out_header = model_to_dict(header.get(id=name_id))
-                        # except ObjectDoesNotExist:
-                        #     return 'Ошибка. Поле name_id задано некорректно'
-                        # match_logical_sign = opt_params['logical_sign'] if 'logical_sign' in opt_params else 'and'
-                        # #  codes from all iterations
-                        # if len(conds_sum) == 1 or match_logical_sign == 'or':
-                        #     cfai = []
-                        # else:
-                        #     cfai = object_manager.filter(parent_structure_id=class_id)
-                        #     if opt_params['node'] == 'b':
-                        #         cfai = cfai.filter(code__in=source_codes)
-                        #     cfai = [o['code'] for o in cfai.values('code').distinct()]
-                        # for cs in conds_sum:
-                        #     cs = re.match(r'(\d+)([eqgtln]{2})(\d+)', cs)
-                        #     search_field = int(cs[1])
-                        #     sign = cs[2]
-                        #     comp_val = int(cs[3])
-                        #     search_field_header = header.filter(id=search_field).values()
-                        #     dict_q = {'eq': Q(value=comp_val), 'ne': ~Q(value=comp_val),
-                        #               'gt': Q(value__gt=comp_val), 'lt': Q(value__lt=comp_val),
-                        #               'ge': Q(value__gte=comp_val), 'le': Q(value__lte=comp_val)}
-                        #     if search_field_header:
-                        #         search_field_header = search_field_header[0]
-                        #     else:   return 'Ошибка. Некорректно задана формула. Не найдено поле для фильтрации ' \
-                        #                    'элементов по условию'
-                        #     # если условие одно - идем по более быстрому алгоритму вычисления
-                        #     if len(conds_sum) == 1:
-                        #         if search_field_header['formula'] == 'float':
-                        #             hist = RegistratorLog.objects.filter(q_date_update, json__class_id=class_id,
-                        #                                                  json__location=location,
-                        #                                                  json__name=search_field,
-                        #                                                  json__code=OuterRef('code'))\
-                        #                 .order_by(order_by_date_update)
-                        #             # Получим запрос, собирающий данные, удовлетворяющий условиям
-                        #             history_query = object_manager.filter(parent_structure_id=class_id)
-                        #             if opt_params['node'] == 'b':
-                        #                 history_query = history_query.filter(code__in=source_codes)
-                        #             history_query = history_query.values('code')\
-                        #                 .distinct().annotate(json=Subquery(hist.values('json')[:1]))
-                        #             # Найдем объекты, соответствующие условию
-                        #             codes_nodata = []
-                        #             sorted_objs = []
-                        #             list_vals = []
-                        #             for hq in history_query:
-                        #                 if hq['json']:
-                        #                     if convert_procedures.do_logical_compare(hq['json']['value'], sign,
-                        #                                                              comp_val):
-                        #                         if search_field == name_id:
-                        #                             list_vals.append(hq['json']['value'] if hq['json']['value'] else 0)
-                        #                         else:
-                        #                             sorted_objs.append(hq['code'])
-                        #                 else:
-                        #                     codes_nodata.append(hq['code'])
-                        #             # проверим выполнение условия у объектов, у которых нет записей в истории
-                        #             objects_no_hist = object_manager.filter(parent_structure_id=class_id,
-                        #                                                     code__in=codes_nodata,
-                        #                                                     name_id=search_field)\
-                        #             .annotate(float_val=Cast('value', FloatField())).filter(dict_q[sign])
-                        #             if search_field != name_id:
-                        #                 sorted_objs.extend([onh.code for onh in objects_no_hist])
-                        #             else:
-                        #                 list_vals += list(map(lambda o: o.value if type(o.value) in
-                        #                                       (float, int) else 0, objects_no_hist))
-                        #             # Посчитаем агрегатную функцию параметра name_id
-                        #             # * Если search_field = name_id
-                        #             if search_field == name_id:
-                        #                 agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        #             else:
-                        #                 # 1.1. Если name_id - число
-                        #                 if out_header['formula'] == 'float':
-                        #                     # построим список значений, которые есть в истории
-                        #                     hist_vals = RegistratorLog.objects.filter(q_date_update,
-                        #                                                               json__class_id=class_id,
-                        #                                                               json__location=location,
-                        #                                                               json__name=name_id,
-                        #                                                               json__code=OuterRef('code'))\
-                        #                         .order_by(order_by_date_update)
-                        #                     codes_hist = object_manager.filter(parent_structure_id=class_id, name_id=name_id,
-                        #                                                        code__in=sorted_objs).values('code')\
-                        #                         .annotate(json=Subquery(hist_vals.values('json')[0]))
-                        #                     codes_nodata = []
-                        #                     for ch in codes_hist:
-                        #                         if ch['json']:
-                        #                             list_vals.append(ch['json']['value'])
-                        #                         else:
-                        #                             codes_nodata.append(ch['code'])
-                        #                     objs_now = object_manager.filter(parent_structure_id=class_id, name_id=name_id,
-                        #                                                     code__in=codes_nodata)
-                        #                     list_vals += list(map(lambda o: o.value if type(o.value) in
-                        #                                            (float, int) else 0, objs_now))
-                        #                     agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        #                 # 1/2 Если name_id - формула
-                        #                 elif out_header['formula'] == 'eval':
-                        #                     objects = object_manager.filter(parent_structure_id=class_id, code__in=sorted_objs)
-                        #                     objects = queryset_to_object(objects)
-                        #                     deep_formula(out_header, objects, user_id, is_contract)
-                        #                     list_vals = list(map(lambda o: o[name_id]['value']
-                        #                                         if type(o[name_id]['value']) in
-                        #                                          (float, int) else 0, objects))
-                        #                     agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        #                 # Остальные типы данных не суммируем
-                        #                 else:
-                        #                     agr_val = 'Ошибка. Формула ссылается на недопустимый для суммирования тип данных'
-                        #         elif search_field_header['formula'] == 'eval':
-                        #             objects = object_manager.filter(parent_structure_id=class_id)
-                        #             if opt_params['node'] == 'b':
-                        #                 objects = objects.filter(code__in=source_codes)
-                        #             objects = queryset_to_object(objects)
-                        #             deep_formula(search_field_header, objects, user_id, is_contract)
-                        #             sorted_objs = []
-                        #             list_vals = []
-                        #             for o in objects:
-                        #                 if convert_procedures.do_logical_compare(o[search_field]['value'],
-                        #                                                          sign, comp_val):
-                        #                     if name_id == search_field:
-                        #                         list_vals.append(o[search_field]['value'])
-                        #                     elif out_header['formula'] == 'float':
-                        #                         sorted_objs.append(o['code'])
-                        #                     elif out_header['formula'] == 'eval':
-                        #                         sorted_objs.append(o)
-                        #                     else:   break
-                        #             # Если сравниваемое поле и выводимое на экран совпадает
-                        #             if name_id == search_field:
-                        #                 agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        #             else:
-                        #                 # Если возвращаемое значение - число
-                        #                 if out_header['formula'] == 'float':
-                        #                     hist = RegistratorLog.objects.filter(q_date_update, json__class_id=class_id,
-                        #                                                          json__name=name_id,
-                        #                                                          json__code=OuterRef('code'),
-                        #                                                          json__location=location).order_by(order_by_date_update)
-                        #                     obj_codes = object_manager.filter(parent_structure_id=class_id, code__in=sorted_objs)\
-                        #                     .values('code').distinct().annotate(json=Subquery(hist.values('json')[:1]))
-                        #                     codes_nodata = []
-                        #                     for oc in obj_codes:
-                        #                         if oc['json']:
-                        #                             list_vals.append(oc['json']['value'] if oc['json']['value'] else 0)
-                        #                         else:
-                        #                             codes_nodata.append(oc['code'])
-                        #                     obj_nodata = object_manager.filter(parent_structure_id=class_id,
-                        #                                                        name_id=name_id,
-                        #                                                        code__in=codes_nodata)
-                        #                     list_vals += list(map(lambda o: o.value if type(o.value) in
-                        #                                          (float, int) else 0, obj_nodata))
-                        #                     agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        #                 # Если возвращаемое значение - формула
-                        #                 elif out_header['formula'] == 'eval':
-                        #                     deep_formula(out_header, sorted_objs, user_id, is_contract)
-                        #                     list_vals = list(map(lambda o: o[name_id]['value'] if o[name_id]['value']
-                        #                                     and (type(o[name_id]['value']) is int or
-                        #                                          type(o[name_id]['value']) is float) else 0, sorted_objs))
-                        #                     agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        #                 else:   agr_val = 'Ошибка. Формула ссылается на недопустимый для суммирования тип данных'
-                        #         else:
-                        #             agr_val = 'Ошибка. Формула ссылается на недопустимый для суммирования тип данных'
-                        #         return agr_val
-                        #     # в противном случае не избежать более длинного пути
-                        #     else:
-                        #         codes = []
-                        #         # а. Если сравниваемый параметр - формула: Нет в истории формул. Мы просто проверяем
-                        #         if search_field_header['formula'] == 'eval':
-                        #             objects = object_manager.filter(parent_structure_id=class_id)
-                        #             if opt_params['node'] == 'b':
-                        #                 objects = objects.filter(code__in=source_codes)
-                        #             if match_logical_sign == 'and':
-                        #                 objects = objects.filter(code__in=cfai)
-                        #             else:
-                        #                 objects = objects.exclude(code__in=cfai)
-                        #             objects = queryset_to_object(objects)
-                        #             deep_formula(search_field_header, objects, user_id, is_contract)
-                        #             for o in objects:
-                        #                 if convert_procedures.do_logical_compare(o[search_field]['value'],
-                        #                                                          sign, comp_val):
-                        #                     codes.append(o['code'])
-                        #         # б. сравниваемое поле - число.
-                        #         elif search_field_header['formula'] == 'float':
-                        #             hist_subq = RegistratorLog.objects.filter(q_date_update,
-                        #                                                       json__class_id=class_id,
-                        #                                                       json__location=location,
-                        #                                                       json__name=search_field,
-                        #                                                       json__code=OuterRef('code'))\
-                        #                 .order_by(order_by_date_update)
-                        #             history_query = object_manager.filter(parent_structure_id=class_id)
-                        #             if opt_params['node'] == 'b':
-                        #                 history_query = history_query.filter(code__in=source_codes)
-                        #             if match_logical_sign == 'and':
-                        #                 history_query = history_query.filter(code__in=cfai)
-                        #             else:
-                        #                 history_query = history_query.exclude(code__in=cfai)
-                        #             history_query = history_query.values('code').distinct()\
-                        #                 .annotate(json=Subquery(hist_subq.values('json')[:1]))
-                        #             codes_nodata = []
-                        #             for hq in history_query:
-                        #                 if hq['json']:
-                        #                     if convert_procedures.do_logical_compare(hq['json']['value'], sign, comp_val):
-                        #                         codes.append(hq['code'])
-                        #                 else:
-                        #                     codes_nodata.append(hq['code'])
-                        #             # проверим выполнение условия у объектов, у которых нет записей в истории
-                        #             objects_no_hist = object_manager.filter(dict_q[sign],
-                        #                                                     parent_structure_id=class_id,
-                        #                                                     code__in=codes_nodata,
-                        #                                                     name_id=search_field).values('code')
-                        #             codes += [o['code'] for o in objects_no_hist]
-                        #         # c. Если константа
-                        #         elif search_field_header['formula'] == 'const':
-                        #             # Найдем алиас
-                        #             alias_loc, alias_id = convert_procedures.slice_link_header(search_field_header['value'])
-                        #             alias_id = int(alias_id)
-                        #             alias_headers = Designer.objects if alias_loc == 'table' else Contracts.objects
-                        #             alias_headers = alias_headers.filter(parent_id=alias_id).values()
-                        #             dict_consts = {}
-                        #             codes = []
-                        #             # найдем объекты в истории
-                        #             hist_subq = RegistratorLog.objects.filter(q_date_update,
-                        #                                                       json__class_id=class_id,
-                        #                                                       json__location=location,
-                        #                                                       json__name=search_field,
-                        #                                                       json__code=OuterRef('code')) \
-                        #                 .order_by(order_by_date_update)
-                        #             history_query = object_manager.filter(parent_structure_id=class_id)
-                        #             if opt_params['node'] == 'b':
-                        #                 history_query = history_query.filter(code__in=source_codes)
-                        #             if match_logical_sign == 'and':
-                        #                 history_query = history_query.filter(code__in=cfai)
-                        #             else:
-                        #                 history_query = history_query.exclude(code__in=cfai)
-                        #             history_query = history_query.values('code').distinct()\
-                        #                 .annotate(json=Subquery(hist_subq.values('json')[0]))
-                        #             codes_nodata = []
-                        #
-                        #             for hq in history_query:
-                        #                 if hq['json'] and  type(hq['json']['value']) in (float, int):
-                        #                     # вычислим выполнение константы
-                        #                     if eval_const(user_id, sign, hq['json']['value'], alias_headers,
-                        #                                   dict_consts,
-                        #                                   comp_val):
-                        #                         codes.append(hq['code'])
-                        #                     else:   codes_nodata.append(hq['code'])
-                        #                 else:
-                        #                     codes_nodata.append(hq['code'])
-                        #             # вычислим функцию для объектов, не попавших в историю
-                        #             objects = object_manager.filter(parent_structure_id=class_id,
-                        #                                             name_id=search_field, code__in=codes_nodata)
-                        #             for o in objects:
-                        #                 if o.value and type(o.value) in (float, int):
-                        #                     if eval_const(user_id, sign, o.value, alias_headers, dict_consts,
-                        #                                   comp_val):
-                        #                         codes.append(o.code)
-                        #         else:
-                        #             return 'Ошибка. Формула ссылается на недопустимый для вычисления тип данных'
-                        #         # Складываем коды
-                        #         if match_logical_sign == 'and':
-                        #             cfai = codes
-                        #         else:
-                        #             cfai += codes
-                        # # Вычисление агрегатной функции
-                        # # а. если накапливаемое поле - формула
-                        # if name_header['formula'] == 'eval':
-                        #     objects = object_manager.filter(parent_structure_id=class_id, code__in=cfai)
-                        #     objects = queryset_to_object(objects)
-                        #     deep_formula(name_header, objects, user_id, is_contract)
-                        #     list_vals = list(map(lambda x: x[name_id]['value'] if type(x[name_id]['value']) is int or
-                        #                          type(x[name_id]['value']) in (float, int) else 0, objects))
-                        #     agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        # # б. Если накапливаемое поле - число
-                        # elif name_header['formula'] == 'float':
-                        #     hist_subq = RegistratorLog.objects.filter(q_date_update, json__class_id=class_id,
-                        #                                               json__location=location,
-                        #                                               json__name=name_id,
-                        #                                               json__code=OuterRef('code')) \
-                        #         .order_by(order_by_date_update)
-                        #     history_query = object_manager.filter(parent_structure_id=class_id, code__in=cfai)\
-                        #         .values('code').distinct().annotate(json=Subquery(hist_subq.values('json')[:1]))
-                        #     codes_nodata = []
-                        #     list_vals = []
-                        #     for hq in history_query:
-                        #         if hq['json']:
-                        #             list_vals.append(hq['json']['value'])
-                        #         else:
-                        #             codes_nodata.append(hq['code'])
-                        #     objects_no_hist = object_manager.filter(parent_structure_id=class_id,
-                        #                                             code__in=codes_nodata, name_id=name_id).values('value')
-                        #     list_vals += list(map(lambda o: o['value'] if o['value'] and type(o['value']) in (float, int)
-                        #                           else 0, objects_no_hist))
-                        #     agr_val = convert_procedures.do_agr_fun(agr_fun, list_vals)
-                        # else:
-                        #     return 'Ошибка. Суммировать можно только поля типов FLOAT или EVAL'
-                        # return agr_val
             # для массива данных или константы
             elif len(v) == 3:
                 try:
                     const_id = int(v[2])
                 except ValueError:
                     return ''  # вычислим массив объектов в функции foreign_link
-
-                    # Комментим и пишем новый код
-                    # # Для массива данных
-                    # def filter_data():
-                    #     if v[2] == 'all':
-                    #         return objs
-                    #     else:
-                    #         log_sign = 'or' if 'logical_sign' in opt_params and opt_params['logical_sign'] == 'or' else 'and'
-                    #         return convert_procedures.fobc(objs, v[2], log_sign)
-                    #
-                    # # Поправка времени на секунду с учетом предыдущей поправки в пройедуре parse_timestamp_for_hist
-                    # timedelta = da_ti.timedelta(seconds=1)
-                    # timestamp = timestamp + timedelta if is_after else timestamp - timedelta
-                    # # Общие данные
-                    # header_manager = Contracts.objects if is_contract else Designer.objects
-                    # objs = []
-                    # object_manager = ContractCells.objects if is_contract else Objects.objects
-                    # objects = object_manager.filter(parent_structure_id=class_id)
-                    # # ветка
-                    # if opt_params['node'] == 'b':
-                    #     objects = objects.filter(name__name='parent_branch', value=opt_params['code'])
-                    # # кластер
-                    # elif opt_params['node'] == 'c':
-                    #     parent_codes = tree_funs.get_inheritors(opt_params['code'], class_header.parent_id, is_contract)
-                    #     parent_codes.append(opt_params['code'])
-                    #     objects = objects.filter(name__name='parent_branch', value__in=parent_codes)
-                    # source_codes = [o['code'] for o in objects.values('code').distinct()]
-                    #
-                    # # для номера версий
-                    # if param_name == 'version_number':
-                    #     for sc in source_codes:
-                    #         # Получим Id последней транзакции
-                    #         ids = RegistratorLog.objects.filter(transact_id=OuterRef('transact_id'))
-                    #         transacts = list(RegistratorLog.objects.filter(json__class_id=class_id,
-                    #                                                        json__location=v[0],
-                    #                                                         json__code=sc)\
-                    #             .values('transact_id').distinct().annotate(id=Subquery(ids.values('id')[:1])))
-                    #         transacts.reverse()
-                    #         num = res_slice
-                    #         if num < 0:  num = 0
-                    #         elif num >= len(transacts):   num = len(transacts) - 1
-                    #         actual_transact = transacts[num]
-                    #         # собирем версию объекта
-                    #         history = RegistratorLog.objects.filter(json__class_id=class_id, json__location=v[0],
-                    #                                                 json__code=sc, json__name=OuterRef('id'),
-                    #                                                 transact_id=actual_transact['transact_id'])
-                    #         headers = header_manager.filter(parent_id=class_id).exclude(formula='eval')\
-                    #         .values().annotate(json=Subquery(history.values('json')[:1]))\
-                    #         .annotate(hist_id=Subquery(history.values('id')[:1]))
-                    #         obj = {'code': sc, 'parent_structure': class_id}
-                    #         empty_headers = []
-                    #         for h in headers:
-                    #             obj[h['id']] = {'id': h['id'], 'name': h['name'], 'type': h['formula']}
-                    #             if h['json']:
-                    #                 obj[h['id']]['value'] = h['json']['value']
-                    #             else:
-                    #                 empty_headers.append(h['id'])
-                    #                 obj[h['id']]['value'] = None
-                    #         # Заполним пустые заголовки
-                    #         hist_param = RegistratorLog.objects\
-                    #             .filter(json__class_id=class_id, json__code=sc, json__location=v[0],
-                    #                     json__name__in=OuterRef('id'), id__lt=actual_transact['id']).order_by('-id')
-                    #         em_heads = header_manager.filter(parent_id=class_id, id__in=empty_headers).values('id')\
-                    #         .annotate(json=hist_param.values('json')[:1])
-                    #         for eh in em_heads:
-                    #             obj[eh['id']]['value'] = eh['json']['value'] if eh['json'] else None
-                    #         objs.append(obj)
-                    #     return filter_data()  # фильтруем данные
-                    # # для параметров version  version_after
-                    # else:
-                    #     value_field = 'json' if is_after else 'json_income'
-                    #     other_field = 'json_income' if is_after else 'json'
-                    #     q_class_id = Q(Q(json__class_id=class_id) | Q(json_income__class_id=class_id))
-                    #     q_loc = Q(Q(json__location=v[0]) | Q(json_income__location=v[0]))
-                    #     q_nam = Q(Q(json__name=OuterRef('id')) | Q(json_income__name=OuterRef('id')))
-                    #     for sc in source_codes:
-                    #         q_cod = Q(Q(json__code=sc) | Q(json_income__code=sc))
-                    #         history = RegistratorLog.objects.filter(q_class_id, q_loc, q_cod, q_nam,
-                    #                                                 date_update__gte=timestamp).order_by('date_update')
-                    #         headers = header_manager.filter(parent_id=class_id).exclude(formula='eval')\
-                    #             .values().annotate(json=Subquery(history.values('json')[:1]))\
-                    #         .annotate(json_income=Subquery(history.values('json_income')[:1]))
-                    #         obj = {'code': sc, 'parent_structure': class_id}
-                    #         obj_today = object_manager.filter(parent_structure_id=class_id, code=sc)
-                    #         for h in headers:
-                    #             obj[h['id']] = {'id': h['id'], 'name': h['name'], 'type': h['formula']}
-                    #             # Если есть значение в необходимом поле
-                    #             if h[value_field]:
-                    #                 obj[h['id']]['value'] = h[value_field]['value']
-                    #             # Если нет значения в нужном поле - не берем ничего
-                    #             elif not h[value_field] and h[other_field]:
-                    #                 obj[h['id']]['value'] = None
-                    #             # Если нет обоих полей - берем современное значение
-                    #             else:
-                    #                 try:
-                    #                     ot = next(ot.value for ot in obj_today if ot.name_id == h['id'])
-                    #                     obj[h['id']] = {'id': h['id'], 'name': h['name'], 'type': h['formula'],
-                    #                                 'value': ot}
-                    #                 except StopIteration:
-                    #                     obj[h['id']] = {'id': h['id'], 'name': h['name'], 'type': h['formula'],
-                    #                                     'value': None}
-                    #         objs.append(obj)
-                    #     return filter_data()  # фильтруем данные
 
                 # для константы
                 history = RegistratorLog.objects.filter(q_date_update, json__class_id=v[1], json__location=v[0],
@@ -1671,41 +1379,63 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
             class_id = object['parent_structure']
             code = object['code']
             location = 'contract' if is_contract else 'table'
-            name_id = None
             for i in v:
-                link_header = Designer.objects if location == 'table' else Contracts.objects
+                name_id = int(i)
+                name_header = Designer.objects if location == 'table' else Contracts.objects
                 try:
-                    link_header = link_header.get(id=i)
+                    name_header = name_header.get(id=name_id)
                 except ObjectDoesNotExist:
                     return 'Ошибка. Некорректно задан параметр формулы ' + k
-                if link_header.parent_id != class_id:
+                if name_header.parent_id != class_id:
                     return 'Ошибка. Некорректно задан параметр формулы ' + k
-                if i == v[len(v) - 1]:
-                    name_id = int(i)
-                    formula = link_header.formula
-                else:
-                    if link_header.formula != 'link':
+                if i != v[len(v) - 1]:
+                    if name_header.formula != 'link':
                         return 'Ошибка. Некорректно задан параметр формулы ' + k
                     deep_object = Objects.objects if location == 'table' else ContractCells.objects
                     try:
-                        deep_object = deep_object.get(code=code, parent_structure_id=class_id, name_id=i)
+                        deep_object = deep_object.get(code=code, parent_structure_id=class_id, name_id=name_id)
                     except ObjectDoesNotExist:
                         return 'Ошибка. Некорректно задан параметр формулы ' + k
                     code = deep_object.value
-                    location, class_id = convert_procedures.slice_link_header(link_header.value)
+                    location, class_id = convert_procedures.slice_link_header(name_header.value)
+                    class_id = int(class_id)
+            name_header = model_to_dict(name_header)
+            formula = object['type'] if len(v) == 1 else location
         history = RegistratorLog.objects.filter(q_date_update, json__class_id=class_id, json__code=code,
-                                                json__name=name_id, json__location=location).order_by(order_by_date_update)
+                                                json__type=formula, json__name=name_id, json__location=location)\
+            .order_by(order_by_date_update)
+
         if history:
             if res_slice >= len(history):
-                res_slice = len(history) - 1
-            result = history[res_slice].json['value']
-            if formula == 'file':
+                result = None
+            else:
+                result = history[res_slice].json['value']
+            if name_header['formula'] == 'file':
                 result = files_procedures.get_file_path(result, str(class_id), location=location)
-            elif formula == 'const':
-                link_header = Designer.objects if location == 'table' else Contracts.objects
-                link_header = link_header.get(id=result)
-                result = static_formula(link_header.value, user_id, *link_chain, **params)
+            elif name_header == 'const':
+                if result:
+                    name_header = Designer.objects if location == 'table' else Contracts.objects
+                    name_header = name_header.get(id=result)
+                    result = static_formula(name_header.value, user_id, *link_chain, **params)
+            elif name_header['formula'] == 'float':
+                if opt_params['type_value'] == 'delta':
+                    current_val = result if result else 0
+                    if history[res_slice].json_income and 'value' in history[res_slice].json_income and history[res_slice].json_income['value']:
+                        prev_val = history[res_slice].json_income['value']
+                    else:
+                        prev_val = 0
+                    result = current_val - prev_val
+                return result
+            elif formula == 'tp':
+                if opt_params['type_value'] == 'fact':
+                    result = result['fact'] if result else 0
+                elif opt_params['type_value'] == 'delay':
+                    result = sum(d['value'] for d in result['delay']) if result else 0
+                else:
+                    result = sum(d['value'] for d in result['delay']) + result['fact'] if result else 0
             return result
+        elif name_header['formula'] == 'float' and opt_params['type_value'] == 'delta':
+            return 0
         else:
             return ''
 
@@ -1717,16 +1447,19 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
         if not date_to:
             date_to = da_ti.datetime.now()
         # Базовые переменные
-        name_id = None
+        name_id = None; class_type = None
         # 1. Внешняя ссылка
-        if v[0] in ('table', 'contract'):
+        if v[0] in ('table', 'contract', 'tp'):
             # 1.1. Полная ссылка
             if len(v) == 4:
-                location = v[0]
+                location = v[0] if v[0] != 'tp' else 'contract'
                 try:
                     class_id = int(v[1])
                 except ValueError:
                     return 'Ошибка. Некорректно задан параметр формулы. ID класса может быть только числом'
+                current_class = Contracts.objects if v[0] == 'contract' else Designer.objects if v[0] == 'table' else TechProcess.objects
+                current_class = current_class.get(id=class_id)
+                class_type = current_class.formula
                 try:
                     code = int(v[2])
                 except ValueError:
@@ -1752,7 +1485,7 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
                     id = int(v[1])
                 except ValueError:
                     return 'Ошибка. Некорректно задан параметр. ID ячейки объекта можно задать только целым числом'
-                cell = Objects.objects if v[0] == 'table' else ContractCells.objects
+                cell = Objects.objects if v[0] == 'table' else ContractCells.objects if v[0] == 'contract' else TechProcess.objects
                 try:
                     cell = cell.get(id=id)
                 except ObjectDoesNotExist:
@@ -1773,17 +1506,18 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
                     int_i = int(i)
                 except ValueError:
                     return 'Ошибка. Формула некорректна. Во внутренних ссылках все элементы являются числами'
-                link_header = Designer.objects if location == 'table' else Contracts.objects
+                name_header = Designer.objects if location == 'table' else Contracts.objects
                 try:
-                    link_header = link_header.get(id=int_i)
+                    name_header = name_header.get(id=int_i)
                 except ObjectDoesNotExist:
                     return 'Ошибка. Некорректно задан параметр формулы ' + k
-                if link_header.parent_id != class_id:
+                if name_header.parent_id != class_id:
                     return 'Ошибка. Некорректно задан параметр формулы ' + k
+                class_type = name_header.formula
                 if v.index(i) == len(v) - 1:
                     name_id = int_i
                 else:
-                    if link_header.formula != 'link':
+                    if name_header.formula != 'link':
                         return 'Ошибка. Некорректно задан параметр формулы ' + k
                     deep_object = Objects.objects if location == 'table' else ContractCells.objects
                     try:
@@ -1791,16 +1525,27 @@ def wwh(k, v, object, is_contract, user_id, opt_params, *link_chain, **params):
                     except ObjectDoesNotExist:
                         return 'Ошибка. Некорректно задан параметр формулы ' + k
                     code = deep_object.value
-                    location, class_id = convert_procedures.slice_link_header(link_header.value)
+                    location, class_id = convert_procedures.slice_link_header(name_header.value)
                     class_id = int(class_id)
         # Посчитаем сумму записей из фрагмента истории
         hist = RegistratorLog.objects.filter(date_update__gte=date_from, date_update__lte=date_to,
-                                             json__class_id=class_id, json__location=location,
+                                             json__class_id=class_id, json__location=location, json__type=class_type,
                                              json__code=code, json__name=name_id)
         if hist:
-            hist = hist.annotate(float_val=Cast(KeyTextTransform('value', 'json'), FloatField()))
             agr_fun = opt_params['agr_fun'] if 'agr_fun' in opt_params else 'sum'
-            agr_val = convert_procedures.do_agr_query(agr_fun, hist, 'float_val')
+            if class_type != 'tp':
+                hist = hist.annotate(float_val=Cast(KeyTextTransform('value', 'json'), FloatField()))
+                agr_val = convert_procedures.do_agr_query(agr_fun, hist, 'float_val')
+            else:
+                agr_val = []
+                for h in hist:
+                    if opt_params['type_value'] == 'fact':
+                        agr_val.append(h.json['value']['fact'])
+                    elif opt_params['type_value'] == 'delay':
+                        agr_val.append(sum(d['value'] for d in h.json['value']['delay']))
+                    else:
+                        agr_val.append(sum(d['value'] for d in h.json['value']['delay']) + h.json['value']['fact'])
+                agr_val = convert_procedures.do_agr_fun(agr_fun, agr_val)
         else:   agr_val = 0
         return agr_val
     else:   return ''
@@ -1954,7 +1699,7 @@ def get_opt_params(formula):
         if not date_to:
             return 'Ошибка. Некорректно задан атрибут "date_to"<br>'
         else:
-            result['date_from'] = date_to
+            result['date_to'] = date_to
 
     # версия, версия после и версия номер
     match_version = re.search(r'\{\{.*(version|version_after)\s*=\s*(?:\'|\")([\d\-.\sT:]{10,19})(?:\'|\")', formula, flags=re.S | re.IGNORECASE)
@@ -1980,7 +1725,7 @@ def add_param_to_object(header, object, var, user_id, is_contract, is_draft=Fals
         cell = object_manager.filter(parent_structure_id=object['parent_structure'], code=object['code'], name_id=var)
         cell_value = cell[0].value if cell else None
         cell_delay = cell[0].delay if cell else []
-        object[var] = {'value': cell_value, 'delay': cell_delay}
+        object[var] = {'value': cell_value, 'delay': cell_delay, 'formula': header['formula']}
         return 'ok'
     else:
         return 'Ошибка. Возможно имеется ошибка в базе данных'

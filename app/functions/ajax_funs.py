@@ -6,7 +6,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, OuterRef, Subquery
 from django.db.models.fields.json import KeyTextTransform
 from django.http import HttpResponse
-from app.functions import convert_funs, convert_procedures, view_procedures, session_funs, hist_funs
+from app.functions import convert_funs, convert_procedures, view_procedures, session_funs, hist_funs, ajax_procs
 from app.models import Objects, Designer, Contracts, ContractCells, Dictionary, RegistratorLog, DictObjects
 from app.other.global_vars import is_mysql
 
@@ -15,26 +15,20 @@ from app.other.global_vars import is_mysql
 def query_link(request):
     if request.user.is_authenticated:
         try:
-            class_type = request.GET['class_type']
-            my_class = Contracts.objects if class_type == 'c' else Designer.objects if class_type == 't' else Dictionary.objects
-            my_class = my_class.get(id=request.GET['header_id'])
-            base_link = my_class.value if class_type != 'd' else re.match(r'(?:contract|table)\.\d+', my_class.default)[0]
-            parent_class_type, parent_class_id = convert_procedures.slice_link_header(base_link)
-            constructor = Designer.objects if parent_class_type == 'table' else Contracts.objects
-            name = 'system_data' if parent_class_type == 'contract' else 'Наименование'
-            parent_class_name_id = constructor.filter(parent_id=parent_class_id, is_required=True, name__iexact=name)[0].id
-            records = Objects.objects if parent_class_type == 'table' else ContractCells.objects
-            object = records.get(code=int(request.GET['link_code']), parent_structure_id=int(parent_class_id),
-                                 name_id=int(parent_class_name_id))
-            val = object.value['datetime_create'] if parent_class_type == 'contract' else object.value
-            result = {'class_id': parent_class_id, 'object_code': int(request.GET['link_code']),
-                      'object_name': val, 'location': parent_class_type[0]}
+            loc = request.GET['class_type']
+            header_id = int(request.GET['header_id'])
+            link_code = int(request.GET['link_code'])
+        except ValueError:
+            result = None
+        else:
+            result = ajax_procs.query_link(header_id, loc, link_code)
+        if result:
             result_string = json.dumps(result)
-        except (ObjectDoesNotExist, ValueError):
+            return HttpResponse(result_string, content_type="application/json")
+        else:
             return HttpResponse('Объект не найден')
-
-        return HttpResponse(result_string, content_type="application/json")
-    else:   return HttpResponse('false')
+    else:
+        return HttpResponse('false')
 
 
 def class_link(request):
@@ -219,7 +213,7 @@ def retreive_const_list(request):
 @view_procedures.if_error
 def promp_link(request):
     manager = Contracts.objects if request.GET['is_contract'] == 'true' else Designer.objects
-    header = manager.get(id=request.GET['header_id'])
+    header = manager.get(id=int(request.GET['header_id']))
     parent_type, parent_id = convert_procedures.slice_link_header(header.value)
     manager_parent_object = ContractCells.objects if parent_type == 'contract' else Objects.objects
     parent_object = manager_parent_object.filter(parent_structure_id=parent_id)
@@ -263,20 +257,30 @@ def promp_direct_link(request):
     name_id = name_id[0]
     link_objects = object_manager.filter(parent_structure_id=class_id, name_id=name_id.id)
 
+    def get_link_objs(link_objs, user_data, is_mysql):
+        if request.GET['location'] == 'c':
+            link_objs = link_objs.filter(value__datetime_create__icontains=user_data)
+        else:
+            if is_mysql:
+                link_objs = link_objs.filter(value__icontains=user_data)
+            else:
+                user_data = request.GET['user_data'].lower()
+                link_objs = [lo for lo in link_objs if user_data in lo.value.lower()]
+        link_objs = list(link_objs)
+        return link_objs
+
     if request.GET['user_data']:
         try:
             obj_code = int(request.GET['user_data'])
         except ValueError:
-            if request.GET['location'] == 'c':
-                link_objects = link_objects.filter(value__datetime_create__icontains=request.GET['user_data'])
-            else:
-                if is_mysql:
-                    link_objects = link_objects.filter(value__icontains=request.GET['user_data'])
-                else:
-                    user_data = request.GET['user_data'].lower()
-                    link_objects = [lo for lo in link_objects if user_data in lo.value.lower()]
+            link_objects = get_link_objs(link_objects, request.GET['user_data'], is_mysql)
         else:
-            link_objects = link_objects.filter(code=obj_code)
+            link_code = list(link_objects.filter(code=obj_code))
+            if not link_code:
+                link_objects = get_link_objs(link_objects, request.GET['user_data'], is_mysql)
+            else:
+                link_objects = link_code
+
     else:
         link_objects = link_objects[:10]
     list_objs = []

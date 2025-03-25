@@ -7,7 +7,8 @@ from django.forms import model_to_dict
 from app.other.global_vars import is_mysql
 import app.functions.contract_funs
 from app.functions import database_funs, reg_funs, convert_procedures, api_procedures, convert_funs, common_funs, \
-    contract_funs, interface_funs, interface_procedures, convert_funs2, task_funs
+    contract_funs, interface_funs, interface_procedures, convert_funs2, task_funs, session_procedures, \
+    contract_procedures
 from app.models import Dictionary, Designer, Contracts, Objects, DictObjects, ContractCells, TechProcess, \
     TechProcessObjects, Tasks
 import pandas as pd
@@ -19,7 +20,7 @@ import pandas as pd
 # источник (словарь с параметрами:айди класса, айди объекта, локация или строка "api"),
 # параметры объекта - реквизиты.
 # Выход - объект queryset или строка с ошибкой.
-def create_object(class_id, user_id, location='table', source=None, **params):
+def create_object(class_id, user_id, location='table', source=None, *list_contracts, **params):
     user = None
     # определим родительскую транзакцию таймштамп
     if 'parent_transact' in params:
@@ -67,10 +68,14 @@ def create_object(class_id, user_id, location='table', source=None, **params):
     else:
         output['location'] = location
     is_contract = True if output['location'] == 'contract' else False
-
-    class_params = manager_class.filter(parent_id=class_id).values()
-    if location != 'dict':
-        class_params = class_params.filter(system=False)
+    all_params = manager_class.filter(parent_id=class_id).values()
+    system_params = []
+    class_params = []
+    for ap in all_params:
+        if location != 'dict' and ap['system']:
+            system_params.append(ap)
+        else:
+            class_params.append(ap)
     if not class_params:
         return 'Ошибка. У указанного класса нет параметров. Работа с объектами данного класса невозможна'
 
@@ -84,12 +89,11 @@ def create_object(class_id, user_id, location='table', source=None, **params):
 
     code = database_funs.get_code(class_id, location) if current_class.formula != 'dict' else int(params['owner'])
 
-    # 2. Для массивов проверка обязательного поля - собственник
+    # Для массивов проверка обязательного поля - собственник
     if output['type'] == 'array':
         array_owner = next(str(cp['id']) for cp in class_params if cp['name'] == 'Собственник')
         if 'owner' in params:
             params[array_owner] = params['owner']
-
     # Для словарей проверим собственника
     elif output['type'] == 'dict':
         if not 'owner' in params:
@@ -123,7 +127,7 @@ def create_object(class_id, user_id, location='table', source=None, **params):
         else:
             params[str_parent_id] = params['parent']
 
-    # Созидание объекта
+    # Созидание кода объекта
     output['code'] = code
     json_object = output.copy()
     # Работа с источником
@@ -168,16 +172,17 @@ def create_object(class_id, user_id, location='table', source=None, **params):
             # Если есть делей данного параметра
             if key_delay in params and key_date_delay in params:
                 if not user:
-                    Users = get_user_model()
                     try:
-                        user = Users.objects.get(id=user_id)
+                        user = get_user_model().objects.get(id=user_id)
                     except ObjectDoesNotExist:
                         return 'Ошибка. Некорректно задан параметр "user_id". В системе нет пользователя с ID = ' + str(user_id)
 
                 delay_date = params[key_date_delay]
                 delay_date = api_procedures.validate_delay_date(delay_date)
-                if delay_date < str_ts:
+                if delay_date < str_ts:  # delay PPA не предусматривается при создании объекта
                     delay_date = datetime.datetime.strftime(timestamp + datetime.timedelta(minutes=1), '%Y-%m-%dT%H:%M')
+
+
                 handler = cp['delay']['handler'] if location == 'contract' else cp['delay_settings']['handler']
                 robot_approve = True
                 if not handler:
@@ -219,70 +224,46 @@ def create_object(class_id, user_id, location='table', source=None, **params):
             jsons.append(json_field)
     if objs:
         if current_class.formula == 'contract':
-            # Проверка системных полей контракта + выполение триггеров
-            msg = contract_funs.dcsp(class_id, None, class_params, user_id, params, params, timestamp, parent_transact)
-            if msg != 'ok':
-                return msg
-        object_manager.bulk_create(objs)
-        object = object_manager.filter(code=code, parent_structure_id=class_id)
-
-        # для контрактов - пропишем первые стадии техпроцессов
-        if current_class.formula in ('contract', 'array') and location == 'contract':
-            tps = TechProcess.objects.filter(parent_id=class_id, formula='tp')
-            for t in tps:
-                header = TechProcess.objects.filter(parent_id=t.id).exclude(settings__isnull=False, settings__system=True)[0]
-                control_field = t.value['control_field']
-                control_field_val = next(o for o in object if o.name_id == control_field)
-                val = {'fact': control_field_val.value, 'delay': []}
-                first_stage = TechProcessObjects(parent_code=code, name_id=header.id, parent_structure_id=t.id, value=val)
-                first_stage.save()
-
-        # для контрактов - проверим условие выполнения
-        if current_class.formula == 'contract':
+            obj_user = get_user_model().objects.get(id=user_id)
+            tps = session_procedures.atic(class_id)
+            new_obj = contract_funs.new_contract(current_class, class_params, system_params, objs, obj_user, timestamp,
+                                                 tps, parent_transact, *list_contracts)
             header_system_data = next(cp for cp in class_params if cp['name'] == 'system_data')
-            system_data_cell = next(o for o in object if o.name_id == header_system_data['id'])
-            cc = list(Contracts.objects.filter(parent_id=current_class.id, name='completion_condition',
-                                               system=True).values())[0]
-            interface_funs.do_cc(current_class, system_data_cell, cc, user_id)
-
-        # Регистрация
-        reg = {'json': json_object}
-        transact_id = reg_funs.get_transact_id(class_id, code, location[0])
-        reg_funs.simple_reg(user_id, 5, timestamp, transact_id, parent_transact, **reg)
-        for j in jsons:
-            reg = {'json': j}
-            req = next(o for o in object if o.name_id == reg['json']['name'])
-            reg['json']['id'] = req.id
-            reg_funs.simple_reg(user_id, 13, timestamp, transact_id, parent_transact, **reg)
-            if location in ('table', 'contract') and req.delay:
-                del j['value']
-                date_update = datetime.datetime.strptime(req.delay[-1]['date_update'], '%Y-%m-%dT%H:%M')
-                delay_ppa = date_update < timestamp
-                if delay_ppa:
-                    req.delay[-1]['date_update'] = datetime.datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
-                    ts = date_update
-                    req.save()
-                else:
-                    ts = timestamp
-                j['delay'] = req.delay
-                reg_delay = {'json': j}
-                reg_funs.simple_reg(user_id, 22, ts, transact_id, parent_transact,  **reg_delay)
-                current_param = next(cp for cp in class_params if cp['id'] == req.name_id)
-                interface_procedures.make_task_4_delay(current_param, req, location[0], user, timestamp, delay_ppa, transact_id)
-
-        # Проверим условие выполнения контракта
-        if current_class.formula == 'contract':
-            system_data_cp = next(cp for cp in class_params if cp['name'] == 'system_data')
-            system_data_cell = next(o for o in object if o.name_id == system_data_cp['id'])
-            cc = list(Contracts.objects.filter(parent_id=current_class.id, name='completion_condition', system=True).values())[0]
-            interface_funs.do_cc(current_class, system_data_cell, cc, user_id)
+            system_data_cell = next(o for o in new_obj if o.name_id == header_system_data['id'])
+            cc = next(sp for sp in system_params if sp['name'] == 'completion_condition')
+            interface_funs.do_cc(current_class, system_data_cell, cc, user_id, timestamp, parent_transact)
+        else:
+            object_manager.bulk_create(objs)
+            new_obj = object_manager.filter(code=code, parent_structure_id=class_id)
+            # Регистрация
+            reg = {'json': json_object}
+            transact_id = reg_funs.get_transact_id(class_id, code, location[0])
+            reg_funs.simple_reg(user_id, 5, timestamp, transact_id, parent_transact, **reg)
+            for j in jsons:
+                reg = {'json': j}
+                req = next(o for o in new_obj if o.name_id == reg['json']['name'])
+                reg['json']['id'] = req.id
+                reg_funs.simple_reg(user_id, 13, timestamp, transact_id, parent_transact, **reg)
+                if location in ('table', 'contract') and req.delay:
+                    del j['value']
+                    date_update = datetime.datetime.strptime(req.delay[-1]['date_update'], '%Y-%m-%dT%H:%M')
+                    delay_ppa = date_update < timestamp
+                    if delay_ppa:
+                        req.delay[-1]['date_update'] = datetime.datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
+                        ts = date_update
+                        req.save()
+                    else:
+                        ts = timestamp
+                    j['delay'] = req.delay
+                    reg_delay = {'json': j}
+                    reg_funs.simple_reg(user_id, 22, ts, transact_id, parent_transact,  **reg_delay)
+                    current_param = next(cp for cp in class_params if cp['id'] == req.name_id)
+                    interface_procedures.make_task_4_delay(current_param, req, location[0], user, timestamp, delay_ppa, transact_id)
     else:
         return 'Ошибка. Не задан ни один параметр объекта. Объект не сохранен'
-    return object
+    return new_obj
 
 
-# Удаление объекта. Вход - аналогично созданию объекта + forsed
-# Выход - строка с ошибкой или результатом
 def remove_object(class_id, code, user_id, location='table', source=None, forced=False, **params):
     # определим родительскую транзакцию и таймштамп
 
@@ -309,6 +290,9 @@ def remove_object(class_id, code, user_id, location='table', source=None, forced
     elif location == 'contract':
         manager_class = Contracts.objects
         object_manager = ContractCells.objects
+    elif location == 'tp':
+        manager_class = TechProcess.objects
+        object_manager = TechProcessObjects.objects
     else:
         return 'Ошибка. Некорректно задана локация класса. Укажите либо \'table\', \'contract\', или \'dict\''
     # Получим класс и его параметры
@@ -316,38 +300,62 @@ def remove_object(class_id, code, user_id, location='table', source=None, forced
         current_class = manager_class.get(id=class_id)
     except ObjectDoesNotExist:
         return 'Ошибка. Некорректно задан ID класса'
-    if current_class.formula not in ['table', 'contract', 'array', 'dict', 'tree']:
+    if current_class.formula not in ['table', 'contract', 'array', 'dict', 'tree', 'tp']:
         return 'Ошибка. Некорректно задан ID класса'
     incoming['type'] = current_class.formula
     # определим пользовательскую локацию  - справочники / контракты
     if location == 'dict':
         incoming['location'] = current_class.default
+    elif location == 'tp':
+        incoming['location'] = 'contract'
     else:
         incoming['location'] = location
-    exclude_names = ('is_right_tree', 'business_rule', 'link_map', 'trigger', 'completion_condition')
-    class_params = manager_class.filter(parent_id=class_id).exclude(name__in=exclude_names)
+    system_params = []; class_params = []
+    all_params = list(manager_class.filter(parent_id=class_id).values())
+    for ap in all_params:
+        if current_class.formula == 'tp':
+            if ap['settings']['system']:
+                system_params.append(ap)
+            else:
+                class_params.append(ap)
+        elif current_class.formula != 'dict' and ap['system']:
+            system_params.append(ap)
+        elif ap['formula'] not in ('array', 'contract', 'table'):
+            class_params.append(ap)
     if not class_params:
         return 'Ошибка. У указанного класса нет параметров. Работа с объектами данного класса невозможна'
 
-    # Проверка на детей
-    res_check_4_children = api_procedures.fc4c(class_id, code, location)
-    if res_check_4_children != 'ok' and not forced:
-        return 'Ошибка. ' + res_check_4_children
-
-    delete_object = object_manager.filter(code=code, parent_structure_id=class_id).select_related('name')
+    if location == 'tp':
+        delete_object = object_manager.filter(parent_structure_id=class_id, parent_code=code)
+    else:
+        # Проверка на детей
+        res_check_4_children = api_procedures.fc4c(current_class, code, location)
+        if res_check_4_children != 'ok' and not forced:
+            return 'Ошибка. ' + res_check_4_children
+        delete_object = object_manager.filter(code=code, parent_structure_id=class_id).select_related('name')
     if not delete_object:
         return 'Ошибка. Не найден объект класса ' + str(class_id) + ' с кодом ' + str(code)
 
     # для контрактов дополнительно проверим условие выполнения.
     if current_class.formula == 'contract' and not forced:
-        if not api_procedures.verify_cc(class_id, delete_object, user_id):
+        system_data = next(cp for cp in class_params if cp['name'] == 'system_data')
+        contract_is_done = next(do.value['is_done'] for do in delete_object if do.name_id == system_data['id'])
+        if not contract_is_done:
             return 'Ошибка. Контракт не может быть удален, т.к. не выполняется "Условие завершения"'
-        # cc = list(Contracts.objects.filter(parent_id=class_id, name='completion_condition', system=True).values())[0]
-        # objs = convert_funs.queyset_to_object(delete_object)
-        # if not contract_funs.do_business_rule(cc, objs[0], user_id):
-        #     return 'Ошибка. Контракт не может быть удален, т.к. не выполняется "Условие завершения"'
-    # Удаление
-    transact_id = reg_funs.get_transact_id(class_id, code, location[0])
+
+    db_loc = 'p' if location == 'tp' else location[0]
+    transact_id = reg_funs.get_transact_id(class_id, code, db_loc)
+
+    # Для контрактов выполним линкмапы и триггер
+    if current_class.formula == 'contract':
+        lm = next(sp['value'] for sp in system_params if sp['name'] == 'link_map')
+        tr = next(sp for sp in system_params if sp['name'] == 'trigger')
+        del_obj = convert_funs.queryset_to_object(delete_object)[0]
+        try:
+            contract_funs.prepare_to_delete_object(lm, tr, del_obj, timestamp, transact_id, user_id)
+        except Exception as ex:
+            return str(ex)
+
     # Удалим техпроцессы, если таковые имеются
     if location == 'contract' and current_class.formula in ('contract', 'array'):
         tps = TechProcess.objects.filter(parent_id=class_id)
@@ -356,7 +364,7 @@ def remove_object(class_id, code, user_id, location='table', source=None, forced
             tp = TechProcessObjects.objects.filter(parent_structure_id=t.id, parent_code=code)
             tp_transact = reg_funs.get_transact_id(t.id, code, 'p')
             for p in tp:
-                inc = {'class_id': t.id, 'code': code, 'location': 'contract', 'type': 'techprocess', 'id': p.id,
+                inc = {'class_id': t.id, 'code': code, 'location': 'contract', 'type': 'tp', 'id': p.id,
                        'name': p.name_id, 'value': p.value}
                 reg = {'json': inc}
                 dict_reg = {'user_id': user_id, 'reg_id': 16, 'timestamp': timestamp, 'transact_id': tp_transact,
@@ -368,29 +376,40 @@ def remove_object(class_id, code, user_id, location='table', source=None, forced
             for tt in tasks:
                 task_funs.delete_stage_task(tt['code'], user_id, timestamp=timestamp, parent_transact=transact_id)
         reg_funs.paket_reg(list_regs)
+
     # удалим словари, если таковые имеются
-    dicts = Dictionary.objects.filter(formula='dict', parent_id=class_id, default=location)
-    for d in dicts:
-        remove_object(d.id, code, user_id, 'dict', source, parent_transact=transact_id,
-                          timestamp=timestamp)
-    # Удалим связанные задачи
-    tasks = Tasks.objects.filter(data__class_id=class_id, data__code=code)
-    for t in tasks:
-        task_funs.delete_simple_task(t, timestamp, parent_transact=transact_id)
+    if current_class.formula in ('contract', 'table'):
+        dicts = Dictionary.objects.filter(formula='dict', parent_id=class_id, default=location)
+        for d in dicts:
+            remove_object(d.id, code, user_id, 'dict', source, parent_transact=transact_id,
+                              timestamp=timestamp)
+        # Удалим связанные задачи
+        tasks = Tasks.objects.filter(data__class_id=class_id, data__code=code)
+        for t in tasks:
+            task_funs.delete_simple_task(t, timestamp, user_id, parent_transact=transact_id)
 
     for do in delete_object:
         json_field = incoming.copy()
         json_field.update(model_to_dict(do))
+        if location == 'tp':
+            del json_field['parent_code']
+            json_field['code'] = code
         reg = {'json_income': json_field}
         reg_funs.simple_reg(user_id, 16, timestamp, transact_id, parent_transact, **reg)
     delete_object.delete()
     reg = {'json_income': incoming}
     reg_funs.simple_reg(user_id, 8, timestamp, transact_id, **reg)
+
+    # Если объект техпроцесса - удалим связанные с ним задачи
+    tasks = Tasks.objects.filter(kind='stage', data__tp_id=class_id, data__parent_code=code).values('code').distinct()
+    for tt in tasks:
+        task_funs.delete_stage_task(tt['code'], user_id, timestamp=timestamp, parent_transact=transact_id)
     return 'Объект успешно удален. Код: ' + str(code) + '. ID класса:' + str(class_id) + '. Тип класса - ' + incoming['type']
 
 
 # Редактирование объекта
 def edit_object(class_id, code, user_id, location='table', source=None, *list_contracts, **params):
+    list_contracts = list(list_contracts)
     # определим родительскую транзакцию и таймштамп
     if 'parent_transact' in params:
         parent_transact = params['parent_transact']
@@ -440,24 +459,30 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
     else:
         json_base['location'] = location
     is_contract = True if json_base['location'] == 'contract' else False
-    exclude_names = ('business_rule', 'link_map', 'trigger')
-    class_params = list(manager_class.filter(parent_id=class_id)\
-                        .exclude(name__in=exclude_names).exclude(formula='array').values())
+    class_params = []
+    system_params = []
     if location != 'tp':
+        all_params = list(manager_class.filter(parent_id=class_id).exclude(formula='array').values())
+        for ap in all_params:
+            if location != 'dict' and ap['system']:
+                system_params.append(ap)
+            else:
+                class_params.append(ap)
         object_params = object_manager.filter(parent_structure_id=class_id, code=code).select_related('name')
+        if not class_params:
+            return 'Ошибка. У указанного класса нет параметров. Работа с объектами данного класса невозможна<br>'
+        # валидация данных
+        result_no_valid_data = ''
+        for k, v in params.items():
+            result_no_valid_data += api_procedures.data_type_validation(k, v, class_params, current_class,
+                                                                        is_contract)
+        if result_no_valid_data:
+            return result_no_valid_data
     else:
         object_params = None
-    if not class_params:
-        return 'Ошибка. У указанного класса нет параметров. Работа с объектами данного класса невозможна<br>'
+
     # зададим тип класса
     json_base['type'] = current_class.formula
-
-    # валидация данных
-    result_no_valid_data = ''
-    for k, v in params.items():
-        result_no_valid_data += api_procedures.data_type_validation(k, v, class_params, current_class, is_contract)
-    if result_no_valid_data:
-        return result_no_valid_data
 
     # Работа с источником
     if source:
@@ -468,6 +493,11 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
 
     # для техпроцесса
     if location == 'tp':
+        # Валидация данных ТПСов
+        try:
+            params = {pk: float(pv) for pk, pv in params.items()}
+        except ValueError:
+            return 'Ошибка. Параметры техпроцесса необходимо передавать в виде чисел<br>'
         tp_params = list(TechProcess.objects.filter(parent_id=class_id).values())
         my_tp = {'id': class_id, 'name': current_class.name, 'parent_id': current_class.parent_id,
                  'cf': current_class.value['control_field']}
@@ -481,7 +511,7 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
                 stages.append(t_p)
                 str_tp_id = str(t_p['id'])
                 if str_tp_id in params:
-                    tp_data['i_stage_' + str_tp_id] = params[str(t_p['id'])]
+                    tp_data['i_stage_' + str_tp_id] = params[str_tp_id]
                 else:
                     old_param = TechProcessObjects.objects.filter(parent_structure_id=class_id, parent_code=code,
                                                                   name_id=t_p['id'])
@@ -492,50 +522,36 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
                         tp_data['i_stage_' + str_tp_id] = 0
         my_tp['system_params'] = sys_params
         my_tp['stages'] = stages
-
-        tps_all_data, tps_change, tps_valid, tp_msg = interface_procedures.check_changes_tps((my_tp,), code,
+        tp_data, tps_change, tps_valid, tp_msg = interface_procedures.check_changes_tps((my_tp,), code,
                                                                                             tp_data)
         if not tps_valid:
             return tp_msg
         if not tps_change:
             return 'Вы не внесли изменений. Объект не сохранен'
-        # Если техпроцесс валиден и в нем были изменения, то выполним проверку системных параметров вышестоящего
-        # контракта перед сохранением
-        parent_class = Contracts.objects.get(id=current_class.parent_id)
-        if parent_class.formula == 'contract':
-            req_params = {'i_stage_' + park: parv for park, parv in params.items()}
-            parent_class_params = list(Contracts.objects.filter(parent_id=current_class.parent_id, system=False).values())
-            dict_my_tps = {nsk: {'state': nsv['value'], 'fact': tps_all_data[current_class.id]['old_stages'][nsk]['fact'],
-                                 'delay': nsv['value'] - tps_all_data[current_class.id]['old_stages'][nsk]['fact']}
-                           for nsk, nsv in tps_all_data[current_class.id]['new_stages'].items() }
-            my_tps = {current_class.id: dict_my_tps}
-            contract_system_funs_result = app.functions.contract_funs\
-                .dcsp(current_class.parent_id, code, parent_class_params, user_id, req_params,req_params, timestamp,
-                      parent_transact, *list_contracts, tps=my_tps)
+        parent_class = Contracts.objects.get(id=my_tp['parent_id'])
+        parent_headers = Contracts.objects.filter(parent_id=my_tp['parent_id'], system=False).exclude(name='array').values()
+        try:
+            contract_funs.edit_tp(my_tp, tp_data[my_tp['id']], code, parent_class, parent_headers, timestamp, parent_transact, user_id)
+        except Exception as ex:
+            return str(ex)
         else:
-            contract_system_funs_result = 'ok'
-        if contract_system_funs_result == 'ok':
-            user_data = get_user_model().objects.get(id=user_id)
-            interface_procedures.save_tps((my_tp,), tps_all_data, code, user_data, timestamp, parent_transact)
             return list(TechProcessObjects.objects.filter(parent_structure_id=my_tp['id'], parent_code=code).values())
-        else:
-            return contract_system_funs_result
 
     # Работа с параметрами объекта
-    objs = []
-    objs_create = []
     is_change = False
     loc = 'p' if location != 'tp' else location[0]
     transact_id = reg_funs.get_transact_id(class_id, code, loc)
     edit_params = {}
-    list_to_registr = []
 
     error_msg = ''
+    event_kind = []
+    edit_objects = []
+    new_objects = []
     for k, v in params.items():
-        is_delay = False
+        is_delay = False   #  поддерживает ли данный параметр делэй в принципе
         date_delay = None
+        str_date_delay = None
         if k.lower() not in ('name', 'parent', 'owner'):
-            str_date_delay = None
             try:
                 k = int(k)
             except ValueError:
@@ -549,65 +565,79 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
                     k = int(k[:-11])
             try:
                 cp = next(cp for cp in class_params if cp['id'] == k)
-                val = convert_procedures.cstdt(v, cp['formula'])
-                is_delay = False
-                if location == 'contract':
-                    if cp['delay'] and cp['delay']['delay']:
-                        is_delay = True
-                elif location == 'table':
-                    is_delay = cp['delay']
             except StopIteration:
-                return 'Ошибка. Некорректно указан параметр с ID: ' + str(k) + '. У данного класса нет поля с указанным ID<br>'
+                return 'Ошибка. Некорректно указан параметр с ID: ' + str(k) + \
+                       '. У данного класса нет поля с указанным ID<br>'
+            if type(v) is str:
+                val = convert_procedures.cstdt(v, cp['formula'])
+            else:
+                val = v
+            if location == 'contract':
+                if cp['delay'] and cp['delay']['delay']:
+                    is_delay = True
+            elif location == 'table':
+                is_delay = cp['delay']
+            handler = None
+            if is_delay and date_delay:
+                handler = cp['delay']['handler'] if is_contract else cp['delay_settings']['handler']
+            is_edit = True
             try:
                 op = next(op for op in object_params if op.name_id == k)
             # Если параметра нет в системе - создадим его
             except StopIteration:
                 is_change = True
-                op = object_create(name_id=k, parent_structure_id=class_id)
-                if location == 'tp':
-                    op.parent_code = code
-                else:
-                    op.code = code
-                outcoming = json_base.copy()
-                outcoming['id'] = op.id
-                outcoming['name'] = k
-                outcoming['formula'] = cp['formula']
-                ts = timestamp
-                if date_delay:
-                    reg_id = 22
-                    new_delay = {'date_update': str_date_delay, 'value': val, 'approve': False}
-                    # Проверим дату. Если дата в прошлом - заделаем Delay PPA
-                    new_delay, ts = api_procedures.vadefoppa(new_delay,  timestamp, current_class, object_params,
-                                                             location)
-                    # Проверим хэндлера
-                    handler = cp['delay']['handler'] if location == 'contract' else cp['delay_settings']['handler']
-                    if not handler:
+                op = object_create(parent_structure_id=class_id, name_id=k, code=code)
+                is_edit = False
+            # Работаем с делэем
+            if is_delay and date_delay:
+                if op.delay == None:
+                    op.delay = []
+                new_delay = {'date_update': str_date_delay, 'value': val, 'approve': False}
+                # Проверка хендлером
+                if not handler:
+                    new_delay['approve'] = True
+                elif not type(handler) is int:
+                    objs = [op]
+                    if interface_procedures.rohatiw(params, class_id, code, cp, class_params, objs, user_id,
+                                                    is_contract):
                         new_delay['approve'] = True
-                    elif not type(handler) is int:
-                        objs = [op]
-                        if interface_procedures.rohatiw(params, class_id, code, cp, class_params, objs, user_id, is_contract):
-                            new_delay['approve'] = True
-                        else:
-                            continue
-
-                    # Защита от дублирования делэя
-                    last_delay = op.delay[-1] if op.delay else {}
-                    if new_delay == last_delay:
+                    else:
+                        error_msg += 'Ответственный (робот) отклонил отложенное изменение параметра ' + str(op.name_id) + '<br>'
                         continue
-
-                    outcoming['delay'] = new_delay
-                    op.delay = new_delay
-                else:
-                    reg_id = 13
-                    outcoming['value'] = val
-                    op.value = val
-                objs_create.append(op)
+                # защита от дублирования
+                if op.delay:
+                    last_delay = op.delay[-1]
+                    if last_delay == new_delay:
+                        continue
                 is_change = True
-                # Регистрация
-                reg = {'json': outcoming}
-                obj_to_registr = {'reg': reg, 'reg_id': reg_id, 'timestamp': ts}
-                list_to_registr.append(obj_to_registr)
-                continue
+                if 'd' not in event_kind:
+                    event_kind.append('d')
+
+                if is_edit:
+                    edit_obj = {'old_delay': copy.deepcopy(op.delay)}
+                    op.delay.append(new_delay)
+                    edit_obj['new_obj'] = op
+                    edit_objects.append(edit_obj)
+                else:
+                    op.delay = [new_delay]
+                    new_objects.append(op)
+            else:
+                if cp['formula'] == 'bool':
+                    op.value = bool(op.value)
+                if op.value != val:
+                    is_change = True
+                    if 'u' not in event_kind:
+                        event_kind.append('u')
+                    # Работаем со значением для редактирования параметра
+                    if is_edit:
+                        edit_obj = {'old_value': op.value}
+                        op.value = val
+                        edit_obj['new_obj'] = op
+                        edit_objects.append(edit_obj)
+                    # Работаем со значением для нового параметра
+                    else:
+                        op.value = val
+                        new_objects.append(op)
         elif current_class.formula in ('tree', 'contract', 'table', 'array'):
             if current_class.formula == 'array':
                 current_key = 'Собственник'
@@ -620,106 +650,29 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
                 val = v
             else:
                 val = int(v) if v else None
+            is_edit = True
             try:
                 op = next(op for op in object_params if op.name_id == cp['id'])
             except StopIteration:
-                op = object_create(code=code, name_id=cp['id'], parent_structure_id=class_id, value=val)
-                op.save()
-                outcoming = json_base.copy()
-                outcoming['name'] = k
-                outcoming['id'] = op.id
-                outcoming['formula'] = cp['formula']
-                outcoming['value'] = val
-                if location == 'dict':
-                    op.parent_code = params['owner']
+                op = object_create(code=code, name_id=cp['id'], parent_structure_id=class_id)
+                is_edit = False
+            if op.value != val:
                 is_change = True
-                # Регистрация
-                reg = {'json': outcoming}
-                obj_to_registr = {'reg': reg, 'reg_id': 13}
-                list_to_registr.append(obj_to_registr)
-                reg_funs.simple_reg(user_id, 13, timestamp, transact_id, parent_transact, **reg)
-                continue
+                if is_edit:
+                    old_val = op.value
+                    op.value = val
+                    new_obj = {'old_value': old_val, 'new_obj': op}
+                    edit_objects.append(new_obj)
+                else:
+                    op.value = val
+                    new_objects.append(op)
         else:
             return 'Ошибка. Параметр "' + k + '" можно указывать только для типов данных "Дерево, Контракт, Справочник"<br>'
         # для массивов контрактов - нельзя изменять собственника
         if op.name.name == 'Собственник' and current_class.formula == 'array':
             return 'Ошибка. Нельзя изменять собственника у массива контракта'
         edit_params[k] = val
-        if location in ('dict', 'tp'):
-            handler = None
-        else:
-            handler = None
-            if location == 'contract':
-                if cp['delay']:
-                    handler = cp['delay']['handler']
-            elif location == 'table':
-                handler = cp['delay_settings']['handler']
-        if date_delay and is_delay:
-            str_delay_date = api_procedures.validate_delay_date(date_delay)
-            # Защита от дублирования делэя
-            if op.delay:
-                try:
-                    next(d for d in op.delay if d['value'] == val and d['date_update'] == str_delay_date)
-                    continue
-                except StopIteration:
-                    pass
-            new_delay = {'date_update': str_delay_date, 'value': val, 'approve': False}
-            # проверим, не ведет ли делэй в прошлое
-            new_delay, ts = api_procedures.vadefoppa(new_delay, timestamp, current_class, object_params, location)
-            # Проверка хендлером
-            if not handler:
-                new_delay['approve'] = True
-            elif not type(handler) is int:
-                objs = [op]
-                if interface_procedures.rohatiw(params, class_id, code, cp, class_params, objs, user_id, is_contract):
-                    new_delay['approve'] = True
-                else:
-                    error_msg += 'Ответственный (робот) отклонил отложенное изменение параметра ' + str(op.name_id) + '<br>'
-                    continue
-            is_change = True
-            incoming = json_base.copy()
-            outcoming = json_base.copy()
-            incoming['name'] = op.name_id
-            outcoming['name'] = op.name_id
-            incoming['id'] = op.id
-            outcoming['id'] = op.id
-            incoming['delay'] = op.delay.copy() if op.delay else []
-            if type(op.delay) is list:
-                op.delay.append(new_delay)
-            else:
-                op.delay = [new_delay]
-            outcoming['delay'] = op.delay
-            objs.append(op)
-            # Регистрация
-            reg = {'json': outcoming, 'json_income': incoming}
-            obj_to_registr = {'reg': reg, 'reg_id': 22, 'timestamp': ts}
-            list_to_registr.append(obj_to_registr)
-        elif op.value != val:
-            if is_delay and handler:
-                error_msg += 'Нельзя редактировать параметры с опцией Delay и включеным модератором реквизита. ' \
-                             'Чтобы отредактировать значение реквизита, задайте отложенное значение. ID параметра: ' \
-                             + str(op.name_id) + '<br>'
-                continue
-            incoming = json_base.copy()
-            outcoming = json_base.copy()
-            incoming['name'] = op.name_id
-            outcoming['name'] = op.name_id
-            incoming['id'] = op.id
-            outcoming['id'] = op.id
-            incoming['value'] = op.value
-            outcoming['value'] = val
-            # Для чисел добавим дельту
-            if cp['formula'] == 'float':
-                old_val = op.value if op.value else 0
-                if current_class.formula == 'contract':
-                        edit_params[k] = val - old_val if val else old_val * -1
-            op.value = val
-            objs.append(op)
-            is_change = True
-            # Регистрация
-            reg = {'json': outcoming, 'json_income': incoming}
-            obj_to_registr = {'reg': reg, 'reg_id': 15, 'timestamp': timestamp}
-            list_to_registr.append(obj_to_registr)
+
     if is_change:
         # если изменения были, то проверим обязательные поля
         if location != 'dict':
@@ -740,56 +693,37 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
                         else:
                             if not type(op.value) in (float, int) and not op.value:
                                 str_errors_req_fields += 'Ошибка. Не задан обязательный параметр. ID: ' + str(cp['id']) + '<br>'
+                    elif cp['formula'] == 'float':
+                        if not params[str_cp_id] and params[str_cp_id] != 0:
+                            str_errors_req_fields += f'Ошибка. Не задан обязательный параметр. ID: {cp["id"]}<br>'
+                    elif cp['formula'] == 'bool':
+                        pass
                     elif not params[str_cp_id]:
                         str_errors_req_fields += 'Ошибка. Не задан обязательный параметр. ID: ' + str(cp['id']) + '<br>'
             if str_errors_req_fields:
                 return str_errors_req_fields
-        # Если были изменения, то работаем с системными параметрами
-        if current_class.formula == 'contract':
-            msg = app.functions.contract_funs.dcsp(class_id, code, class_params, user_id, params, edit_params,
-                                                   timestamp, parent_transact, *list_contracts)
-            if msg != 'ok':
-                return msg
-        # Сохранение
-        list_params = ['value']
-        if location != 'dict':
-            list_params.append('delay')
-        object_manager.bulk_update(objs, list_params)  # Изменим параметры
-        object_manager.bulk_create(objs_create)   # Создадим параметры
-        # Вызов сохраненного объекта
-        edited_object = object_manager.filter(parent_structure_id=class_id, code=code)
-        # Регистрация и создание тасков
-        for ltr in list_to_registr:
-            if ltr['reg_id'] == 22:
-                current_param = next(cp for cp in class_params if cp['id'] == ltr['reg']['json']['name'])
-                req = next(eo for eo in edited_object if eo.name_id == ltr['reg']['json']['name'])
-                my_user = get_user_model().objects.get(id=user_id)
-                delay_ppa = ltr['timestamp'] < timestamp
-                if delay_ppa:
-                    last_delay = ltr['reg']['json']['delay'][-1]
-                    interface_procedures.rhwpd('contract', current_class.formula, ltr['timestamp'], last_delay,
-                                               req, user_id, transact_id)
-                else:
-                    reg_funs.simple_reg(user_id, ltr['reg_id'], ltr['timestamp'], transact_id, parent_transact,
-                                        **ltr['reg'])
-                interface_procedures.make_task_4_delay(current_param, req, 'c', my_user, ltr['timestamp'], delay_ppa,
-                                                       transact_id)  # Создаем / регистрируем таск
-            else:
-                reg_funs.simple_reg(user_id, ltr['reg_id'], ltr['timestamp'], transact_id, parent_transact,
-                                    **ltr['reg'])
+        if is_contract:
+            # Сохранение и выполнение бирулиматров
+            object_user = get_user_model().objects.get(id=user_id)
+            ec_params = {'event_kind': event_kind, 'tps_all': None, 'parent_transact': parent_transact}
+            tps = session_procedures.atic(class_id)
+            try:
+                edited_object = contract_funs.edit_contract(current_class, code, class_params, system_params, tps,
+                                                            edit_objects, new_objects, object_user, timestamp,
+                                                            *list_contracts, **ec_params)
+            except Exception as ex:
+                edited_object = str(ex)
 
-        # проверим условие выполнения
-        if current_class.formula == 'contract':
-            system_data_cell = next(op for op in object_params if op.name.name == 'system_data')
-            cc = next(cp for cp in class_params if cp['name'] == 'completion_condition')
-            interface_funs.do_cc(current_class, system_data_cell, cc, user_id)
+            # проверим условие выполнения
+            if current_class.formula == 'contract':
+                system_data_cell = next(op for op in object_params if op.name.name == 'system_data')
+                cc = next(sp for sp in system_params if sp['name'] == 'completion_condition')
+                interface_funs.do_cc(current_class, system_data_cell, cc, user_id, timestamp, parent_transact)
 
-        # Если у данного класса есть ТПы, то проверим изменение контрольных полей
-        if location == 'contract' and current_class.formula in ('contract', 'array'):
-            tps = TechProcess.objects.filter(parent_id=current_class.id, formula='tp')
+            # Если у данного класса есть ТПы, то проверим изменение контрольных полей
             for t in tps:
-                cf = next(eo for eo in edited_object if eo.name_id == t.value['control_field'])
-                stages = TechProcessObjects.objects.filter(parent_structure_id=t.id, parent_code=cf.code).order_by('name_id')
+                cf = next(eo for eo in edited_object if eo.name_id == t['cf'])
+                stages = TechProcessObjects.objects.filter(parent_structure_id=t['id'], parent_code=cf.code).order_by('name_id')
                 old_cf_val = sum(s.value['fact'] + sum(d['value'] for d in s.value['delay']) for s in stages)
                 if cf.value != old_cf_val:
                     delta = cf.value - old_cf_val
@@ -800,16 +734,90 @@ def edit_object(class_id, code, user_id, location='table', source=None, *list_co
                     outc = inc.copy()
                     outc['value'] = stages[0].value
                     reg = {'json_income': inc, 'json': outc}
-                    tp_trans = reg_funs.get_transact_id(t.id, cf.code, 'p')
+                    tp_trans = reg_funs.get_transact_id(t['id'], cf.code, 'p')
                     reg_funs.simple_reg(user_id, 15, timestamp, tp_trans, transact_id, **reg)
+            return edited_object
+        else:
+            # Изменение и регистрация
+            general_reg_data = {'class_id': current_class.id, 'code': code, 'location': location, 'type': current_class.formula}
+            edit_vals = [eo for eo in edit_objects if 'old_value' in eo]
+            object_user = get_user_model().objects.get(id=user_id)
+            if edit_vals:
+                edited_values = [eo['new_obj'] for eo in edit_vals]
+                object_manager.bulk_update(edited_values, ['value'])
+                inc = general_reg_data.copy()
+                for ev in edit_vals:
+                    inc['id'] = ev['new_obj'].id
+                    inc['name'] = ev['new_obj'].name_id
+                    inc['value'] = ev['old_value']
+                    outc = inc.copy()
+                    outc['value'] = ev['new_obj'].value
+                    reg = {'json': outc, 'json_income': inc}
+                    reg_funs.simple_reg(user_id, 15, timestamp, transact_id, parent_transact, **reg)
+            edit_delays = [eo for eo in edit_objects if 'old_delay' in eo]
+            if edit_delays:
+                inc = general_reg_data.copy()
+                for ed in edit_delays:
+                    last_delay = ed['new_obj'].delay[-1]
+                    date_update = datetime.datetime.strptime(last_delay['date_update'], '%Y-%m-%dT%H:%M')
+                    delay_plan = date_update > timestamp
+                    if delay_plan:
+                        date_delay = None
+                    else:
+                        date_delay = date_update
+                        last_delay['date_update'] = datetime.datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
+                        ed['new_obj'].save()
+                    inc['id'] = ed['new_obj'].id
+                    inc['name'] = ed['new_obj'].name_id
+                    inc['delay'] = ed['old_delay']
+                    outc = inc.copy()
+                    outc['delay'] = ed['new_obj'].delay
+                    reg = {'json': outc, 'json_income': inc, 'date_delay': date_delay}
+                    reg_funs.simple_reg(user_id, 22, timestamp, transact_id, parent_transact, **reg)
+
+                    current_param = next(cp for cp in class_params if cp['id'] == ed['new_obj'].name_id)
+                    interface_procedures.make_task_4_delay(current_param, ed['new_obj'], location[0], object_user, timestamp,
+                                                           not delay_plan, transact_id)  # Создаем / регистрируем таск
+                edited_delays = [ed['new_obj'] for ed in edit_delays]
+                object_manager.bulk_update(edited_delays, ['delay'])
+
+            if new_objects:
+                outc = general_reg_data.copy()
+                for no in new_objects:
+                    no.save()
+                    outc['id'] = no.id
+                    outc['name'] = no.name_id
+                    outc['value'] = no.value
+                    reg = {'json': outc}
+                    reg_funs.simple_reg(user_id, 13, timestamp, transact_id, parent_transact, **reg)
+                    if no.delay:
+                        del outc['value']
+                        last_delay = no.delay[-1]
+                        date_update = datetime.datetime.strptime(last_delay['date_update'], '%Y-%m-%dT%H:%M')
+                        ppa = timestamp > date_update
+                        if ppa:
+                            date_delay = date_update
+                            last_delay['date_update'] = datetime.datetime.strftime(timestamp, '%Y-%m-%dT%H:%M')
+                            no.save()
+                        else:
+                            date_delay = None
+                        outc['delay'] = no.delay
+                        reg = {'json': outc, 'date_delay': date_delay}
+                        reg_funs.simple_reg(user_id, 22, timestamp, transact_id, parent_transact, **reg)
+                        current_param = next(cp for cp in class_params if cp['id'] == no.name_id)
+                        interface_procedures.make_task_4_delay(current_param, no, location[0], object_user, timestamp,
+                                                               ppa, parent_transact)
+
+            # Вызов сохраненного объекта
+            edited_object = object_manager.filter(parent_structure_id=class_id, code=code)
         return edited_object
+
     else:
         if not error_msg:
             error_msg = 'Не задан или не изменен ни один параметр объекта<br>Объект не сохранен'
         return error_msg
 
 
-# Получить объект. Вход: айди класса, код объекта, айди юзера,
 def get_object(class_id, code, location='table'):
     if location == 'table':
         manager = Objects.objects
@@ -854,7 +862,7 @@ def get_object(class_id, code, location='table'):
                     # Получим список кодов дочерних элементов в текущем массиве
                     child_codes = [m['code'] for m in manager.filter(parent_structure_id=a.id,
                                                                      name__name__iexact='Собственник',
-                                                                     value=str(code)).values('code').distinct()]
+                                                                     value=code).values('code').distinct()]
                     children = manager.filter(code__in=child_codes, parent_structure_id=a.id)
                     if children:
                         obj['arrays'][a.id] = convert_funs.queryset_to_object(children)
@@ -950,7 +958,7 @@ def get_object_list(class_id, *conditions,  **params):
         message.append('Ошибка. Не задано ни одно условие')
     else:
         for c in conditions:
-            if not re.match(r'^\d+[eqgtln]{2}.*$', c):
+            if not re.match(r'^\d+[eqgtlnk]{2}.*$', c):
                 result = False
                 message.append('Ошибка. Некорректно задано условие. Задавайте условия по шаблону "Число",  "знак сравнения", "Результат"' \
                            ' Например: 18gt50 или 53neTrue')
@@ -969,7 +977,7 @@ def get_object_list(class_id, *conditions,  **params):
                 message.append('Ошибка. Некорректно задан параметр "page". необходимо указать целое число')
     if result:
         # разбор условий
-        dict_query_sign = {'gt': '>', 'lt': '<', 'ge': '>=', 'le': '<=', 'eq': '=', 'ne': '<>'}
+        dict_query_sign = {'gt': '>', 'lt': '<', 'ge': '>=', 'le': '<=', 'eq': '=', 'ne': '<>', 'lk': 'like'}
         json_extract = 'JSON_UNQUOTE(JSON_EXTRACT(value, "$"))' if is_mysql else 'JSON_EXTRACT(value, "$")'
         begin_query = 'select id, code from (select id, code, value, ' + json_extract + \
                            'AS val_str, Cast(JSON_EXTRACT(value, "$") as float) as val_float FROM ' + table_name \
@@ -977,21 +985,31 @@ def get_object_list(class_id, *conditions,  **params):
         codes = []
         for c in conditions:
             result_query = begin_query
-            list_c = re.search(r'^(\d+)([eglnqt]{2})(.*)$', c)
+            list_c = re.search(r'^(\d+)([eglnqtk]{2})(.*)$', c)
             name_id = list_c[1]
             symb = list_c[2]
             val = list_c[3]
             result_query += ' name_id = ' + name_id + ') as subtable where'
+            bool_var = [False, False]
             try:
                 float(val)
                 result_query += ' subtable.val_float'
             except ValueError:
                 result_query += ' subtable.val_str'
+                # Если работаем с булевыми переменными, то по признаку = true выполняем поиск напрямую,
+                # но если = false, то находим все истинные значение, затем находим остальные коды
                 if val.lower() in ('true', 'false'):
-                    val = val.lower()
-                val = '\"' + val + '\"'
+                    bool_var[0] = True
+                    bool_var[1] = val.lower() == 'true' and symb == 'eq' or val.lower() == 'false' and symb == 'ne'
+                elif symb == 'lk':
+                    val = f'\"%{val}%\"'
+                else:
+                    val = '\"' + val + '\"'
+            if bool_var[0]:
+                result_query += ' = true'
+            else:
+                result_query += ' ' + dict_query_sign[symb] + ' ' + val
 
-            result_query += ' ' + dict_query_sign[symb] + ' ' + val
             # для второго и последующих условий добавим доп условие - работает с кодами предыдущих запросов
             if conditions.index(c):
                 if params['logic_connector'] == 'and':
@@ -999,12 +1017,28 @@ def get_object_list(class_id, *conditions,  **params):
                 elif codes:
                     result_query += ' and code not in (' + ','.join([str(c) for c in codes]) + ')'
             query = object_manager.raw(result_query)
-            if params['logic_connector'] == 'and':
-                codes = [q.code for q in query]
-                if not codes:
-                    break
+            # здесь конвертируем неистинные коды для булевого параметра
+            if bool_var == [True, False]:
+                objs = object_manager.filter(parent_structure_id=int_class_id).exclude(code__in=[q.code for q in query])
+                if conditions.index(c):
+                    if params['logic_connector'] == 'and':
+                        objs = objs.filter(code__in=codes)
+                    elif codes:
+                        objs = objs.exclude(code__in=codes)
+                objs = [o['code'] for o in objs.values('code').distinct()]
+                if params['logic_connector'] == 'and':
+                    codes = objs
+                    if not codes:
+                        break
+                else:
+                    codes += objs
             else:
-                codes += [q.code for q in query]
+                if params['logic_connector'] == 'and':
+                    codes = [q.code for q in query]
+                    if not codes:
+                        break
+                else:
+                    codes += [q.code for q in query]
 
         if 'num_objects' in params:
             page = params['page'] if 'page' in params else 1
@@ -1027,7 +1061,7 @@ def get_object_list(class_id, *conditions,  **params):
         list_objects = []
         for c in codes:
             reqs_one_obj = [lr for lr in list_reqs if lr.code == c]
-            object = convert_funs2.get_full_object(reqs_one_obj, headers, params['location'])
+            object = convert_funs2.get_full_object(reqs_one_obj, current_class, headers, params['location'])
             list_objects.append(object)
 
         def structed_fields(field_list, list_object, lcm):
@@ -1056,7 +1090,7 @@ def get_object_list(class_id, *conditions,  **params):
                         for lo in list_object:
                             if fl['id'] in lo:
                                 link_reqs = link_objects.filter(code=lo[fl['id']]['value'])
-                                link_object = convert_funs2.get_full_object(link_reqs, link_headers, params['location'])
+                                link_object = convert_funs2.get_full_object(link_reqs, current_class, link_headers, params['location'])
                                 lo[fl['id']]['value'] = link_object
                                 structed_fields(fl['children'], (link_object, ), link_class_manager)
         structed_fields(finish_fields, list_objects, class_manager)
@@ -1082,16 +1116,17 @@ def get_object_list(class_id, *conditions,  **params):
             def unpack_child(obj, k, v, param_name):
                 if type(v) is dict and 'code' in v:
                     for kk in list(v.keys()):
-                        if kk not in ('code', 'parent_structure_id', 'type', 'date_update'):
+                        if kk not in ('code', 'parent_structure', 'type', 'date_update'):
                             obj[kk] = v[kk]
                             obj[kk]['name'] = param_name + '.' + obj[kk]['name']
                             vv = v[kk]['value']
                             unpack_child(obj, kk, vv, obj[kk]['name'])
                     del obj[k]
+
             order_fields = sort_fields(finish_fields)
             for lo in list_objects:
                 for k in list(lo.keys()):
-                    if k not in ('code', 'parent_structure_id', 'type', 'date_update'):
+                    if k not in ('code', 'parent_structure', 'type', 'date_update'):
                         v = lo[k]['value']
                         param_name = lo[k]['name']
                         unpack_child(lo, k, v, param_name)
@@ -1497,13 +1532,16 @@ def remove_class_param(user_id, class_type, param_id, location='t', **params):
 def remove_class(user_id, class_id, class_type, location='t', **params):
     if location not in ('t', 'c'):
         return 'некорректно указано расположение класса. Выберите один из двух символов: t  или c'
-    manager = Dictionary.objects if class_type == 'dict' else Contracts.objects if location == 'c' else Designer.objects
+    if class_type == 'tp':
+        manager = TechProcess.objects
+    else:
+        manager = Dictionary.objects if class_type == 'dict' else Contracts.objects if location == 'c' else Designer.objects
     try:
         current_class = manager.get(id=class_id, formula=class_type)
     except (ObjectDoesNotExist, ValueError):
         return 'некорректно заданы параметры: class_id, class_type, location. Класс не найден'
     # проверка на дочерние классы
-    if class_type not in ('dict', 'alias', 'techpro'):
+    if class_type not in ('dict', 'alias', 'tp'):
         dict_children_classes = {'folder': ('folder', 'tree', 'table', 'contract'), 'tree': ('table', 'contract'),
                                  'table': ('array', ), 'contract': ('array', ), 'array': ('techpro', )}
         if manager.filter(parent_id=class_id, formula__in=dict_children_classes[current_class.formula]) or\
@@ -1514,24 +1552,35 @@ def remove_class(user_id, class_id, class_type, location='t', **params):
         if not database_funs.chpoc(class_id, is_contract):
             return 'Нельзя удалить константу, у которой есть свойства'
     # Проверка на объекты (кроме техпроцессов, там валим вместе с объектами)
-    object_manager = DictObjects.objects if class_type == 'dict' else ContractCells.objects if location == 'c' else Objects.objects
+    if class_type == 'tp':
+        object_manager = TechProcessObjects.objects
+    else:
+        object_manager = DictObjects.objects if class_type == 'dict' else ContractCells.objects if location == 'c' else Objects.objects
     transact_id = None
     timestamp = None
-    if class_type == 'techpro':
-        objs = object_manager.filter(parent_structure_id=class_id).values('code').distinct()
-        transact_id = reg_funs.get_transact_id(current_class.id, 0, location)
+
+    if class_type == 'tp':
+        db_loc = 'p'
+    elif class_type == 'dict':
+        db_loc = 'd'
+    else:
+        db_loc = location
+
+    if class_type == 'tp':
+        objs = object_manager.filter(parent_structure_id=class_id).values('parent_code').distinct()
+        transact_id = reg_funs.get_transact_id(current_class.id, 0, 'p')
         timestamp = params['timestamp'] if 'timestamp' in params else datetime.datetime.today()
         for o in objs:
-            remove_object(class_id, o['code'], user_id, location, timestamp=timestamp, parent_transact=transact_id)
+            remove_object(class_id, o['parent_code'], user_id, 'tp', timestamp=timestamp, parent_transact=transact_id)
     else:
         if object_manager.filter(parent_structure_id=class_id):
             return 'У удаляемого класса есть объекты. Удаление невозможно'
     # Регистрация удаления параметров
     class_params = manager.filter(parent_id=class_id).exclude(formula__in=('folder', 'tree', 'contract', 'table', 'array',
-                                                                           'dict', 'techpro'))
+                                                                           'dict', 'tp'))
     parent_transact = params['parent_transact'] if 'parent_transact' in params else None
     timestamp = params['timestamp'] if 'timestamp' in params else datetime.datetime.today() if not timestamp else timestamp
-    transact_id = reg_funs.get_transact_id(current_class.id, 0, location) if not transact_id else transact_id
+    transact_id = reg_funs.get_transact_id(current_class.id, 0, db_loc) if not transact_id else transact_id
     list_regs = []
     for cp in class_params:
         reg = {'json_income': model_to_dict(cp)}
@@ -1593,13 +1642,6 @@ def get_class_list(parent_id=None, location='t'):
     return True, do_eval(parent_id, location)
 
 
-def run_eval(user_id, eval):
-    obj = {}
-    header = {'value': eval, 'id': 1, 'name': 'no_name'}
-    convert_funs.deep_formula(header, (obj,), user_id, True)
-    return obj[1]['value']
-
-
 # Удаляет объекты по списку или диапазону кодов. location = [t, c, d]
 # Опциональные параметры: first_code, last_code, list_codes
 # Возвращает список удаленных кодов и комментарий
@@ -1622,7 +1664,7 @@ def remove_object_list(class_id, user_id, **params):
     if not 'forced' in params:
         params['forced'] = False
     if not 'timestamp' in params:
-        params['timestamp'] = datetime.today()
+        params['timestamp'] = datetime.datetime.today()
     if not 'parent_transact' in params:
         params['parent_transact'] = None
     # Валидация данных

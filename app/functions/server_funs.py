@@ -1,5 +1,4 @@
 import os, smtplib
-from django.contrib.sites import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from subprocess import Popen, PIPE

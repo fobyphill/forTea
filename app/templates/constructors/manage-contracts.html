@@ -368,13 +368,13 @@
                 <span id="system_fields">{{ system_props|json_dumps }}</span>
                 <input id="param_id">
                 <input id="is_dict"
-                    {% if request.GET.location == 'd' %}
+                    {% if location == 'd' %}
                         value="true"
                    {% else %}
                         value="false"
                    {% endif %}
                 >
-                <input id="i_loc" value="{{ location }}">
+                <input id="i_loc" name="i_loc" value="{{ location }}">
             </div>
         </form>
     </div>

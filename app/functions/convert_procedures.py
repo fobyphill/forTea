@@ -9,7 +9,7 @@ from django.db.models.functions import Cast
 
 from app.functions import tree_funs, object_funs, hist_funs, convert_funs2, session_procedures
 from app.functions.convert_funs import queryset_to_object
-from app.models import Contracts, ContractCells, Objects, Designer, RegistratorLog
+from app.models import Contracts, ContractCells, Objects, Designer, RegistratorLog, TechProcess, TechProcessObjects
 
 
 def find_user(formula, user_id):
@@ -34,8 +34,12 @@ def retreive_tags(formula):
     formuls = re.findall(r'\[\[(?:(?!\[\[)(?:.|\n))*?\]\]', formula, flags=re.I)
     for f in formuls:
         f = f[2:len(f) - 2]
+        # Если задан двумерный массив - вернем пустой результат
+        if re.search(r'\,', f):
+            json_parts.append({f: None})
+            continue
         # Найдем тип данных - state, fact, delay
-        value_kind = re.search(r'\d+\.(state|fact|delay)', f, re.S)
+        value_kind = re.search(r'\d+\.(state|fact|delay|delta)', f, re.S)
         if value_kind:
             k = re.sub(r'\.' + value_kind[1], '', f, re.S)
         else:
@@ -101,6 +105,7 @@ def parse_timestamp(str_datetime):
             return timestamp
     else:
         return False
+
 
 # распознает строковую датувремя. В зависимости от направления движения по времени прибавляет или отнимает одну секунду
 # Возвращает таймштамп в формате дата-время или ложь
@@ -188,6 +193,8 @@ def cstdt(str_var, type):
             val = str_var.lower() == 'true'
         else:
             val = str_var
+    elif type == 'float':
+        val = 0
     else:
         val = None
     return val
@@ -227,6 +234,7 @@ def sobah(objs, array_headers):
                 objs.sort(key=lambda x: x[k]['value'], reverse=r)
     return objs
 
+
 # gc1b - get codes one branch
 def gc1b(class_header, code, node, is_contract,):
     manager = ContractCells.objects if is_contract else Objects.objects
@@ -242,6 +250,7 @@ def gc1b(class_header, code, node, is_contract,):
                                value__in=parent_codes).values('code').distinct()]
     return source_codes
 
+
 # gaoc = get array of conds
 def gaoc(str_conds):
     conds = re.findall(r'\d+[eqnltgk]{2}.+?(?:;|$)', str_conds, flags=re.IGNORECASE | re.S)
@@ -250,6 +259,7 @@ def gaoc(str_conds):
         match = re.match(r'(\d+)([eqnltgk]{2})(.+?)(?:;|$)', c)
         array_conds.append({'header_id': int(match[1]), 'sign': match[2], 'cmp_val': match[3]})
     return array_conds
+
 
 # foblc = filter object by logical conds
 def foblc(obj, headers, array_conds, logical_sign):
@@ -325,7 +335,7 @@ def gtfol(objects, visible_headers, is_contract=False):
         if vh['formula'] == 'float' and vh['settings'] and 'totals' in vh['settings'] and vh['settings']['totals']:
             all_this_req = manager.filter(parent_structure_id=vh['parent_id'], name_id=vh['id'], value__isnull=False) \
                 .annotate(val=Cast('value', output_field=FloatField()))
-            page_list = [o[vh['id']]['value'] for o in objects if vh['id'] in o and o[vh['id']]['value'] != None]
+            page_list = [o[vh['id']]['value'] for o in objects if vh['id'] in o and o[vh['id']]['value']]
             for tot in vh['settings']['totals']:
                 rus_tot = dict_totals[tot]
                 if not rus_tot in totals:
@@ -366,6 +376,7 @@ def dict_to_post(my_dict):
         my_request.POST[mk] = mv
     return my_request
 
+
 # fitoop = filter to operation
 # преобразование фильтра в логическую операцию
 def fitoop(left_val, filter, right_val):
@@ -386,7 +397,7 @@ def fitoop(left_val, filter, right_val):
 
 
 # renepreva = retreive next / previous value
-def renepreva(base_query, code, timestamp, is_after, location, name_id, data_type):
+def renepreva(base_query, code, timestamp, is_after, class_type, location, name_id, data_type):
     q = Q(date_update__gt=timestamp) if is_after else Q(date_update__lt=timestamp)
     order_by = 'date_update' if is_after else '-date_update'
     query = base_query.filter(q, json__location=location, json__code=code, json__name=name_id, reg_name__in=(13, 15)) \
@@ -397,9 +408,23 @@ def renepreva(base_query, code, timestamp, is_after, location, name_id, data_typ
         else:
             return 0 if data_type == 'float' else ''
     elif is_after:
-        return renepreva(base_query, code, timestamp, False, location, name_id, data_type)
+        return renepreva(base_query, code, timestamp, False, class_type, location, name_id, data_type)
     else:
-        return 0 if data_type == 'float' else ''
+        if class_type == 'tp':
+            manager = TechProcessObjects.objects
+        elif location == 'contract':
+            manager = ContractCells.objects
+        else:
+            manager = Objects.objects
+        obj_param = manager.filter(name_id=name_id)
+        if class_type == 'tp':
+            obj_param = obj_param.filter(parent_code=code)
+        else:
+            obj_param = obj_param.filter(code=code)
+        if obj_param:
+            return obj_param[0].value
+        else:
+            return 0 if data_type == 'float' else ''
 
 
 # ficlubraco = filter_cluster_branch_codes
@@ -451,7 +476,7 @@ def gvfo(class_id, str_date, is_contract, is_after, user_id, source_codes=[]):
                 obj = hist_funs.gov(class_id, ex_co['code'], loc, next_change[0].date_update, tom, user_id, children=False)
             else:
                 obj = manager.filter(parent_structure_id=class_id, code=ex_co['code'])
-                obj = convert_funs2.get_full_object(obj, tom['headers'], loc)
+                obj = convert_funs2.get_full_object(obj, tom['current_class'], tom['headers'], loc)
         else:
             obj = hist_funs.gov(class_id, ex_co['code'], loc, version, tom, user_id, children=False)
         if obj:
@@ -462,58 +487,144 @@ def gvfo(class_id, str_date, is_contract, is_after, user_id, source_codes=[]):
 # Преобразовывает формулу вида [[user_data]] в html-теги
 def userdata_to_interface(header, code, is_contract, is_main_page):
     dict_types = {'string': 'text', 'number': 'number', 'bool': 'checkbox', 'date': 'date',
-                  'datetime': 'datetime-local', 'link': 'number'}
+                  'datetime': 'datetime-local', 'link': ''}
+    str_is_contract = str(is_contract).lower()
     user_data = re.findall(r'\[\[\s*\n*\s*user_data_\d+\s*\n*\s*(?:\{\{[\w\W]*?\}\}|)\s*\n*\s*\]\]', header['value'],
                            flags=re.M)
     val = ''
     if user_data:
-        calc_button_label = 'Рассчитать'
+        list_user_data = []
+        button = {}
+        # Преобразуем строки в структуру
         for ud in user_data:
             find_data = re.search(r'user_data_(\d+)\s*\n*\s*(?:\{\{([\w\W]*)\}\}|)', ud, flags=re.M)
-            val += '<div class="input-group mb-3">'
-            val += '<span class="input-group-text">'
-            # Разберем опциональные параметры
-            label = 'Пользовательская переменная №' + find_data[1]
-            data_type = 'text'
-            data_list = ''
-            link_class = '0'
-            link_location = 't'
+            dict_user_data = {'id': find_data[1]}
             if find_data[2]:
-                find_label = re.search(r'label\s*\n*\s*=\s*\n*\s*\'([\w\s\_]+)\'', find_data[2])
+                find_label = re.search(r'label\s*=\s*\'([\w\s.,-;:]+)\'', find_data[2], flags=re.DOTALL)
                 if find_label:
-                    label = find_label[1]
-                find_type = re.search(r'type\s*\n*\s*=\s*\n*\s*(string|number|bool|datetime|date|link)', find_data[2])
+                    dict_user_data['label'] = find_label[1]
+                find_type = re.search(r'type\s*\n*\s*=\s*\n*\s*(string|number|bool|datetime|date|link|table)', find_data[2])
                 if find_type:
-                    data_type = dict_types[find_type[1]]
+                    dict_user_data['type'] = find_type[1]
                     if find_type[1] == 'link':
-                        data_list = '<datalist id="dl_' + str(header['id']) + '_' + label + '"></datalist>'
                         find_link_class = re.search(r'link_class\s*\n*\s*=\s*\n*\s*(\d+)', find_data[2])
                         if find_link_class:
-                            link_class = find_link_class[1]
+                            dict_user_data['link_class'] = find_link_class[1]
                         find_link_location = re.search(r'link_location\s*\n*\s*=\s*\n*\s*([tc])', find_data[2])
                         if find_link_location:
-                            link_location = find_link_location[1]
+                            dict_user_data['link_location'] = find_link_location[1]
+                    elif find_type[1] == 'table':
+                        find_structure = re.search(r'structure\s*=\s*\[(.*)\]', find_data[2], flags=re.DOTALL)
+                        if find_structure:
+                            structure = []
+                            fnd_lst_struct = re.findall(r'\{.*?\}', find_structure[1])
+                            for fls in fnd_lst_struct:
+                                dict_struct = {}
+                                find_name = re.search(r'name\s*=\s*[\'\"]([\w\s]+)[\'\"]', fls)
+                                if find_name:
+                                    dict_struct['name'] = find_name[1]
+                                else:
+                                    dict_struct['name'] = f'Заголовок {fnd_lst_struct.index(fls) + 1}'
+                                find_type = re.search(r'type\s*=\s*(number|string|datetime|date|link|bool)', fls)
+                                if find_type:
+                                    dict_struct['type'] = find_type[1]
+                                    if dict_struct['type'] == 'link':
+                                        fnd_lnk_clss = re.search(r'link_class\s*=\s*(\d+)', fls)
+                                        if fnd_lnk_clss:
+                                            dict_struct['link_class'] = fnd_lnk_clss[1]
+                                        fnd_lnk_loc = re.search(r'link_location\s*=\s*([tc])', fls)
+                                        if fnd_lnk_loc:
+                                            dict_struct['link_location'] = fnd_lnk_loc[1]
+                                else:
+                                    dict_struct['type'] = 'string'
+                                dict_struct['clean'] = bool(re.search(r'clean', fls))
+                                structure.append(dict_struct)
+                            dict_user_data['structure'] = structure
+
                 find_button_label = re.search(r'button\s*\n*\s*=\s*\n*\s*\'([\w\s\_]+)\'', find_data[2])
                 if find_button_label:
-                    calc_button_label = find_button_label[1]
-            val += label
-            val += '</span>'
-            val += '<input id="const_' + str(header['id']) + '_user_data_' + find_data[1] + '" class= "form-control" ' \
-                                                                                        'type="' + data_type + '"'
-            if data_type == 'number':
-                val += ' step="any"'
-            if data_list:
-                val += ' list="dl_' + str(header['id']) + '_' + find_data[1] + '" oninput="promp_direct_link(this, \'' \
-                       + link_location + '\', ' + link_class + ')"><datalist id="dl_' + str(header['id']) \
-                       + '_' + find_data[1] + '"></datalist'
-            val += '></div>'
+                    button['label'] = find_button_label[1]
+                find_default = re.search(r'default\s*=\s*(?:\'|\")(.*)(?:\'|\")', find_data[2])
+                if find_default:
+                    dict_user_data['default'] = find_default[1]
+                dict_user_data['clean'] = bool(re.search(r'clean', find_data[2]))
+            list_user_data.append(dict_user_data)
 
-        str_is_contract = str(is_contract).lower()
+        # Конвертнем структуру в html-строку
+        for lud in list_user_data:
+            data_type = lud['type'] if 'type' in lud else 'string'
+            if data_type == 'table':
+                val += f'<span class=input-group-text>{lud["label"]}</span><table class="table table-bordered" ' \
+                       f'id="const_{header["id"]}_user_data_{lud["id"]}"><thead><tr class="row m-0">'
+                for s in lud['structure']:
+                    val += f'<th class="col text-center">{s["name"]}</th>'
+                val += '</tr></thead><tr class="row m-0">'
+                for s in lud['structure']:
+                    var_num = lud['structure'].index(s)
+                    lud_id = lud['id']
+                    val += f'<td class="col"><input class="form-control" type="{dict_types[s["type"]]}"' \
+                           f' id="table_{lud_id}_num_0_{var_num}"'
+                    if s['clean']:
+                        val += ' defaultvalue="clean"'
+                    if s['type'] == 'link':
+                        val += f' list="table_{lud_id}_list_0_{var_num}" oninput="promp_direct_link(this, ' \
+                               f'\'{s["link_location"]}\', {s["link_class"]})">' \
+                               f'<datalist id="table_{lud_id}_list_0_{var_num}"></datalist>'
+                    else:
+                        val += '>'
+                    val += '</td>'
+                val += '</tr><tr class="row m-0 text-left"><td class=col><button class="btn btn-outline-info"' \
+                       f'onclick=atud(this)>+</button></td></tr></table>'
+            else:
+                val += '<div class="input-group mb-3"><span class="input-group-text">'
+                label = lud['label'] if 'label' in lud else f'Пользовательская переменная №{lud["id"]}'
+                val += label + '</span>'
+
+                tag_name = 'textarea' if data_type == 'string' else 'input'
+                type_info = f'type="{dict_types[data_type]}"' if data_type != 'string' else ''
+                val += f'<{tag_name} {type_info} id=const_{header["id"]}_user_data_{lud["id"]} class="form-control"'
+                if data_type == 'number':
+                    val += ' step="any"'
+                if 'default' in lud:
+                    val += f' value={lud["default"]}'
+                if lud['clean']:
+                    val += ' defaultValue="clean"'
+                if data_type == 'link':
+                    val += f' list="dl_{header["id"]}_{lud["id"]}" oninput="promp_direct_link(this, ' \
+                           f'\'{lud["link_location"]}\', {lud["link_class"]})"'
+                if data_type == 'string':
+                    val += ' style="min-height: 1rem"></textarea>'
+                else:
+                    val += '>'
+                if data_type == 'link':
+                    val += f'<datalist id="dl_{header["id"]}_{lud["id"]}"></datalist>'
+                val += '</div>'
+        # добавим кнопку
         fun_name = 'cmpf(' + str(header['id']) + ')' if is_main_page else 'calc_user_data(' + str(header['id']) + ', ' \
                     + str(code) + ', ' + str_is_contract + ')'
-        val = val[
-              :-6] + f'<div class="input-group-append"><button class="btn btn-outline-secondary" onclick="{fun_name}"' \
-              + '>' + calc_button_label + '</button></div></div>'
-        val += '<div id="div_const_' + str(header['id']) + '_result"></div>'
+        button_label = button['label'] if 'label' in button else 'Рассчитать'
+        val += f'<div class="input-group mb-3"><button class="btn btn-outline-secondary"' \
+               f'onclick="{fun_name}">{button_label}</button></div>'
+        # добавим див результата
+        val += f'<div id="div_const_{header["id"]}_result"></div>'
     return val
+
+
+# convert raw value in tp to float val
+# ravaltonum = raw value to number
+def ravaltonum(raw_val, data_type):
+    if type(raw_val) is dict:
+        if data_type == 'fact':
+            num_val = raw_val['fact']
+        elif data_type == 'delay':
+            num_val = sum(d['value'] for d in raw_val['delay'])
+        else:
+            num_val = sum(d['value'] for d in raw_val['delay']) + raw_val['fact']
+        return num_val
+    else:
+        return raw_val
+
+
+
+
 

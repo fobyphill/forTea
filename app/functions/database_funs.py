@@ -2,7 +2,8 @@ import json
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Max
 from app.functions import reg_funs, convert_procedures, database_procedures
-from app.models import Objects, Designer, ContractCells, Contracts, Dictionary, DictObjects, TablesCodes, OtherCodes
+from app.models import Objects, Designer, ContractCells, Contracts, Dictionary, DictObjects, TablesCodes, OtherCodes, \
+    Tasks
 
 
 # Функции базы данных - обеспечивающие безопасную эксплуатацию данными:
@@ -29,9 +30,13 @@ def get_code(class_id, location):
         max_code.save()
         return max_code.max_code
     except ObjectDoesNotExist:
-        dict_manager = {'table': Objects.objects, 'contract': ContractCells.objects, 'dict': DictObjects.objects}
+        dict_manager = {'table': Objects.objects, 'contract': ContractCells.objects, 'dict': DictObjects.objects,
+                        'task': Tasks.objects}
         manager = dict_manager[location]
-        object = manager.filter(parent_structure_id=class_id)
+        if location == 'task':
+            object = manager.filter(data__class_id=class_id)
+        else:
+            object = manager.filter(parent_structure_id=class_id)
         if object:
             max_code = object.aggregate(max_code=Max('code'))['max_code'] + 1
         else:
@@ -102,22 +107,17 @@ def change_class_priority(class_id, param_id, move, formula):
 
 # Проверка, есть ли дети у даанного объекта. Локация - по базе данных - т.е. table, contract, dict
 # Результат = False - нет детей, list_of_children - есть дети
-def check_children(class_id, code, database_location):
+def check_children(current_class, code, database_location):
     children = []
     if database_location not in ('table', 'contract'):
         return False
     class_manager = Contracts.objects if database_location == 'contract' else Designer.objects
-    current_class = class_manager.filter(id=class_id)
-    if not current_class:
-        return False
-    else:
-        current_class = current_class[0]
     # Проверка ссылок
     managers = [ {'header': Designer.objects, 'objects': Objects.objects},
                  {'header': Contracts.objects, 'objects':ContractCells.objects}
                 ]
     for m in managers:
-        table_links = m['header'].filter(formula='link', value=database_location + '.' + str(class_id))
+        table_links = m['header'].filter(formula='link', value=database_location + '.' + str(current_class.id))
         for tl in table_links:
             child = m['objects'].filter(name_id=tl.id, parent_structure_id=tl.parent_id, value=str(code))
             if child:
@@ -135,11 +135,11 @@ def check_children(class_id, code, database_location):
     #  для дерева
     if current_class.formula == 'tree':
         # Проверка дочерних веток
-        children_branches = obj_manager.filter(name__name='parent', parent_structure_id=class_id, value=code)
+        children_branches = obj_manager.filter(name__name='parent', parent_structure_id=current_class.id, value=code)
         if children_branches:
             children.append(children_branches)
         # Проверка дочерник объектов
-        children_classes = class_manager.filter(parent_id=class_id, formula=database_location)
+        children_classes = class_manager.filter(parent_id=current_class.id, formula=database_location)
         for cc in children_classes:
             child_obj = obj_manager.filter(parent_structure_id=cc.id, name__name='parent_branch', value=code)
             if child_obj:

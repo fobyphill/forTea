@@ -4,8 +4,8 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 
-from app.functions import session_funs, convert_funs, tech_funs, convert_funs2
-from app.models import Designer, MainPageConst, MainPageAddress
+from app.functions import session_funs, convert_funs, tech_funs, convert_funs2, session_procedures
+from app.models import Designer, MainPageConst, MainPageAddress, UserSets
 
 
 def login_view(request):
@@ -24,9 +24,9 @@ def logout(request):
 
 def index(request):
     if request.user.is_authenticated:
-        my_main_page = MainPageAddress.objects.filter(user_id=request.user.id)
-        if my_main_page:
-            return HttpResponseRedirect(my_main_page[0].address)
+        my_main_page = UserSets.objects.filter(user_id=request.user.id)
+        if my_main_page and my_main_page[0].main_page:
+            return HttpResponseRedirect(my_main_page[0].main_page)
         else:
             main_page_const = list(MainPageConst.objects.filter(user_login=True).values('id', 'name', 'value'))
             convert_funs2.pati(main_page_const, user_id=request.user.id, main_page=True)
@@ -42,6 +42,7 @@ def index(request):
             request.session['hour'] = datetime.today().hour
             session_funs.add_data_types(request)  # ДОбавим в сессию типы данных
             session_funs.add_class_types(request)  # добавим в сессию типы классов
+            request.session['pagination'] = session_procedures.retreive_pagination(request.user.id)  # пагинация по умолчанию
             return HttpResponseRedirect(reverse("index"))
         else:
             return render(request, 'common/login.html', {'message': 'Неверный логин или пароль. Попробуйте еще раз.'})

@@ -18,3 +18,9 @@
         {% include 'constructors/../base/handbook-top-menu.html' %}
     {% endif %}
 {% endif %}
+{# меню для задач #}
+{% with '/tasks /manage-tasks' as list %}
+    {% if request.path in list.split %}
+        {% include 'contracts/../constructors/../base/tasks-top-menu.html' %}
+    {% endif %}
+{% endwith %}

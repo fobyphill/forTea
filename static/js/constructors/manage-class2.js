@@ -223,7 +223,7 @@ function new_field(is_contract, is_tree=false) {
     new_tr.setAttribute('onclick', sel_param)
     let table_name = (is_tree) ? 'tree_params' : 'table_params'
     $('#' + table_name).append(new_tr)
-    let b_new_field = (is_tree) ? 'b_tree_new_param' : 'b_new_para'
+    let b_new_field = (is_tree) ? 'b_tree_new_param' : 'b_new_param'
     $('#b' + b_new_field).attr('disabled', true)
     // Название
     let new_name = document.createElement('td')
@@ -296,14 +296,16 @@ function new_field(is_contract, is_tree=false) {
         $('#b_new_param').attr('disabled', true)
     }
     // делэй
-    let td_delay = document.createElement('td')
-    td_delay.className = 'col-0-5 text-center'
-    let chb_delay = document.createElement('input')
-    chb_delay.type = 'checkbox'
-    chb_delay.id = 'delaynew'
-    chb_delay.setAttribute('onclick', 'set_delay_settings(this)')
-    td_delay.appendChild(chb_delay)
-    new_tr.appendChild(td_delay)
+    if (!is_tree){
+        let td_delay = document.createElement('td')
+        td_delay.className = 'col-0-5 text-center'
+        let chb_delay = document.createElement('input')
+        chb_delay.type = 'checkbox'
+        chb_delay.id = 'delaynew'
+        chb_delay.setAttribute('onclick', 'set_delay_settings(this)')
+        td_delay.appendChild(chb_delay)
+        new_tr.appendChild(td_delay)
+    }
 }
 
 // выбрать алиас из списка
@@ -479,7 +481,7 @@ function fill_class_params(is_array, is_contract=false, is_tree=false){
             if (field.name === 'Собственник')
                 input_val.setAttribute('readOnly', true)
             let value = decodeHtml(field.value)
-            if (field.formula == 'enum') {
+            if (field.formula === 'enum') {
                 value = field.value.join('\n')
             }
             input_val.value = value
@@ -871,7 +873,7 @@ function full_search_in_tree(){
                     case 'dict':
                         url += 'd'
                         break
-                    case 'techprocess':
+                    case 'tp':
                         url += 't'
                         break
                     default:
@@ -903,7 +905,7 @@ function full_search_in_tree(){
                 case 'dict':
                     img = 'star_50'
                     break
-                case 'techprocess':
+                case 'tp':
                     img = 'tp_50'
                     break
             }

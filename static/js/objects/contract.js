@@ -18,6 +18,7 @@ window.onload = function () {
     fill_search_filter()  // Заполним фильтры поиска
 }
 
+
 // новый объект
 function new_obj() {
     // чистим
@@ -30,7 +31,7 @@ function new_obj() {
     $("span[id*='s_']").html('')
     $('label[id*="l_file_"]').html('Выберите файл')
     $('div[id*="div_formula_"]').html('')
-    $("div[id*='div_table_slave_']").html('')
+    $("tbody[id*='tbody_array_']").html('')
     $('#i_hist_range').val('').attr('max', '0')
     $('#steplist').html('')
     $('#div_timeline_pagination').remove()
@@ -49,11 +50,14 @@ function new_obj() {
     $('#div_tl_delay').attr('class', 'tag-invis')
     // покажем
     $('#b_save').attr('disabled', false)
-    // Разблочим собственника
+    // Разлочим собственника
     let owner = $('a:contains("Собственник")')
     if (owner.length){
         let owner_id = owner[0].id.slice(8)
-        $('#i_link_' + owner_id).attr('readonly', false).css('background-color', 'white')
+        let owner_code = $("#dsf" + owner_id).text().match(/\d+/)
+        if (owner_code) owner_code = owner_code[0]
+        $('#i_link_' + owner_id).attr('readonly', false).css('background-color', 'white').val(owner_code)
+
     }
     // Получим техпроцессы
     tps = JSON.parse($('#tps').text())
@@ -109,6 +113,9 @@ function new_obj() {
                 reflofi(current_node[0], true)
             }
         }
+        else if (dict.name === 'Собственник'){
+            // ничего не делаем. мы ранеее уже заполнили собственники из поиска
+        }
         else current_node.val(dict.default)
         if (dict.formula === 'link')
             fast_get_link(current_node[0], 'c')
@@ -138,6 +145,7 @@ function new_obj() {
     $('span[id^="s_stage_"]').html('')
 
 }
+
 
 function recount_tps(this_inp, is_set_interval=false) {
     let interval = (is_set_interval) ? 1000 : 0
@@ -183,6 +191,7 @@ function recount_tps(this_inp, is_set_interval=false) {
         this_inp.value = sum
     }, interval)
 }
+
 
 function get_tp_currrent_sum(tp_id) {
     let tag_stages = $('input[id^="i_stage_' + tp_id + '_"]').toArray()

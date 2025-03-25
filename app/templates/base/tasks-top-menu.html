@@ -1,0 +1,10 @@
+<nav class="my-navbar navbar-expand navbar-white fixed-top" style="width: 100%;
+border-bottom: 2px solid #dee2e6; cursor: default; position: initial">
+    <div class="navbar-nav">
+        {# Конструктор задач #}
+        {% if request.user.is_superuser %}
+            <a href="/manage-tasks" class="nav-link{% if request.path == '/manage-tasks' %} active text-bold{% endif %}">Конструктор задач</a>
+        {% endif %}
+        <a href="/tasks" class="nav-link{% if request.path == '/tasks' %} active text-bold{% endif %}">Задачи</a>
+    </div>
+</nav>

@@ -119,8 +119,8 @@ function pls(this_input, is_contract=false) {
                     result.appendChild(op)
                 })
             },
-            error: function () {
-                result.innerText = ''
+            error: function (err) {
+                result.innerHTML = '<option value="error">' + err.responseText + '</option>'
             }
         })
     }, 800)
@@ -251,7 +251,6 @@ function recount_alias(this_select) {
             result.html('error')
         }
     })
-
 }
 
 
@@ -292,4 +291,141 @@ function fast_get_link(this_input,class_type='t'){
             }
         })
     }
+}
+
+
+function get_tps(this_button){
+    let array_id = this_button.id.slice(13)
+    let timestamp = get_timestamp()[0]
+    let array_codes = []
+    json_object[array_id].objects.forEach(el => array_codes.push(el.code))
+    $.ajax({url:'get-tps',
+        method:'get',
+        dataType:'json',
+        data: {array_id: array_id, timestamp: timestamp, array_codes: JSON.stringify(array_codes)},
+        success:function(data){
+            let my_objs = json_object[array_id].objects
+            for (let mo = 0; mo < my_objs.length; mo++){
+                let my_obj = my_objs[mo]
+                for (let i = 0; i < data.length; i++){
+                    let tp = data[i]
+                    let tp_obj = tp.objects.find(el => el.code === my_obj.code)
+                    let tr = document.createElement('tr')
+                    tr.className = 'row tr-tps-info'
+                    tr.setAttribute('style', 'margin: 0;')
+                    $('#trar_' +  array_id + '_' + my_obj.code)[0].after(tr)
+                    let td_empty = document.createElement('td')
+                    td_empty.className = 'col-1 bg-white'
+                    tr.appendChild(td_empty)
+                    let td_name = document.createElement('td')
+                    td_name.className = 'col-4 text-center'
+                    td_name.style = 'border: 1px solid #dee2e6'
+                    td_name.innerHTML = 'ТП: ' + tp.name
+                    tr.appendChild(td_name)
+                    let td_data = document.createElement('td')
+                    td_data.className = 'col'
+                    td_data.setAttribute('style', 'padding: 0')
+                    tr.appendChild(td_data)
+                    let div_headers = document.createElement('div')
+                    div_headers.className = 'row m-0'
+                    td_data.appendChild(div_headers)
+                    // заголовки
+                    for (let k in tp){
+                        if (['id', 'objects', 'name'].includes(k))
+                            continue
+                        let div_header = document.createElement('div')
+                        div_header.className = 'col text-center p-0'
+                        div_header.style = 'border: 1px solid #dee2e6'
+                        div_header.innerText = tp[k]
+                        div_headers.appendChild(div_header)
+                    }
+                    let div_vals = document.createElement('div')
+                    div_vals.className = 'row m-0'
+                    td_data.appendChild(div_vals)
+                    for (let k in tp){
+                        if (['id', 'objects', 'name'].includes(k))
+                            continue
+                        let div_val = document.createElement('div')
+                        div_val.className = 'col text-center p-0'
+                        div_val.style = 'border: 1px solid #dee2e6'
+                        div_val.innerText = (k in tp_obj) ? tp_obj[k] : ''
+                        div_vals.appendChild(div_val)
+                    }
+                }
+            }
+            // Итоги
+            let tr_totals = document.createElement('tr')
+            tr_totals.className = 'row m-0 tr-tps-info'
+            let tbody_array = $('#tbody_array_' + array_id)
+            tbody_array.append(tr_totals)
+            let td_empty = document.createElement('td')
+            td_empty.className = 'col-1 bg-white'
+            tr_totals.appendChild(td_empty)
+            let td_totals = document.createElement('td')
+            td_totals.className = 'col py-0'
+            td_totals.innerHTML = '<b>Итоги по техпроцессам</b>'
+            tr_totals.appendChild(td_totals)
+            for (let i = 0; i < data.length; i++){
+                let tr = document.createElement('tr')
+                tr.className = 'row m-0 tr-tps-info'
+                tbody_array.append(tr)
+                tr.appendChild(td_empty.cloneNode())
+                let td_tp_name = document.createElement('td')
+                td_tp_name.className = 'col-4 text-center'
+                td_tp_name.style = 'border: 1px solid #dee2e6'
+                td_tp_name.innerText = data[i].name
+                tr.appendChild(td_tp_name)
+                let td_tp_data = document.createElement('td')
+                td_tp_data.className = 'col p-0'
+                td_tp_data.style = 'border: 1px solid #dee2e6'
+                tr.appendChild(td_tp_data)
+                // Заголовки
+                let div_headers = document.createElement('div')
+                div_headers.className = 'row m-0'
+                td_tp_data.appendChild(div_headers)
+                for (let k in data[i]){
+                    if (['id', 'objects', 'name'].includes(k))
+                            continue
+                    let div_header = document.createElement('div')
+                    div_header.className = 'col text-center p-0'
+                    div_header.style = 'border: 1px solid #dee2e6'
+                    div_header.innerText = data[i][k]
+                    div_headers.appendChild(div_header)
+                }
+                // Итоги
+                let div_totals = document.createElement('div')
+                div_totals.className = 'row m-0'
+                td_tp_data.appendChild(div_totals)
+                for (let k in data[i]){
+                    if (['id', 'objects', 'name'].includes(k))
+                            continue
+                    let total = 0
+                    let tot_objs = data[i].objects
+                    for (let j = 0; j < tot_objs.length; j++)
+                        total += (k in tot_objs[j]) ? tot_objs[j][k] : 0
+                    let div_val = document.createElement('div')
+                    div_val.className = 'col text-center p-0'
+                    div_val.style = 'border: 1px solid #dee2e6'
+                    div_val.innerText = total
+                    div_totals.appendChild(div_val)
+                }
+            }
+            // Работаем с кнопкой
+            this_button.parentNode.parentNode.remove()
+            let tr_button = document.createElement('tr')
+            tr_button.className = 'row m-0 tr-tps-info bg-white'
+            tbody_array.append(tr_button)
+            let td_button = document.createElement('td')
+            td_button.className = 'col p-0 text-center'
+            tr_button.appendChild(td_button)
+            let button_del = document.createElement('button')
+            button_del.className = 'btn btn-link btn-sm'
+            button_del.innerText = 'Удалить информацию о техпроцессах'
+            button_del.setAttribute('onclick',  'del_tps(' + array_id + ')')
+            td_button.appendChild(button_del)
+        },
+        error: function (data) {
+            $('#div_msg').text('Ошибка: ' + data.responseText).attr('class', 'text-red')
+        }
+    })
 }

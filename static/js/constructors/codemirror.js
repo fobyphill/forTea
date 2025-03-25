@@ -62,6 +62,8 @@ function hoverWidgetOnOverlay(cm, overlayClass, widget) {
         return true;
     });
 }
+
+
 function hyperlinkOverlay(cm) {
     if (!cm) return;
 

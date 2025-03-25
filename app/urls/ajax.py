@@ -32,4 +32,5 @@ urlpatterns = [
     path('calc-main-page-formula', ajax_funs_2.cmpf, name='calc-main-page-formula'),
     path('uch', ajax_funs_2.uch, name='uch'),
     path('draft-link', ajax_funs_2.draft_link, name='draft-link'),
-] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    path('get-tps', ajax_funs_2.get_tps, name='get-tps'),
+]

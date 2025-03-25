@@ -64,7 +64,7 @@
                                 {% endif %}
                                 <input class="form-control" id="sf{{ h.id }}"
                                        oninput="change_search(this){% if h.formula == 'link' %}; glas(this, '{{ db_loc }}');
-                                           {% if db_loc == 'd' %}sdlp(this){% else %}pls(this){% endif %}{% endif %}"
+                                           {% if db_loc == 'd' %}sdlp(this){% else %}pls(this, {{ is_contract }}){% endif %}{% endif %}"
                                 {% if h.formula == 'bool' %}
                                        type="checkbox"
                                 {% elif h.formula == 'float' %}

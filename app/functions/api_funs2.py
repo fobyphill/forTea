@@ -1,19 +1,23 @@
 import copy
 from datetime import datetime, timedelta
 
+from django.core.exceptions import ObjectDoesNotExist
+from django.forms import model_to_dict
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from requests import auth
 
-from app.functions import ajax_funs_2, session_funs, hist_funs, view_procedures, files_funs, reg_funs, object_funs
-from app.models import Designer, Objects, Contracts, ContractCells, RegistratorLog, Dictionary, TechProcess
+from app.functions import ajax_funs_2, session_funs, hist_funs, view_procedures, files_funs, reg_funs, object_funs, \
+    database_funs
+from app.models import Designer, Objects, Contracts, ContractCells, RegistratorLog, Dictionary, TechProcess, \
+    TaskClasses, Tasks
 
 
 # location = [table, contract, dict, tp]
 def get_object_hist(class_id, code,  date_from, date_to=datetime.today(), **params):
     location = params['location'] if 'location' in params else 'contract'
     children = bool(params['children']) if 'children' in params else True
-    user_id = 6  # временное решение до оптимизации вызова формул. user_id нигде не используется, но его требует функция вычисления формулы
+    user_id = 1  # временное решение до оптимизации вызова формул. user_id нигде не используется, но его требует функция вычисления формулы
     if location == 'contract':
         class_manager = Contracts.objects
     elif location == 'table':
@@ -243,6 +247,28 @@ def upload_file(request):
         return HttpResponse('Файл ' + request.FILES['file'].name + ' успешно загружен.')
     else:
         return HttpResponse(msg)
+
+
+# Создать объект таска вида custom
+def make_task(task_id, user_id):
+    try:
+        task_class = TaskClasses.objects.get(id=task_id)
+    except ObjectDoesNotExist:
+        return f'Ошибка. Не найден класс задачи с ID: {task_id}<br>'
+    timestamp = datetime.today()
+    data = {'class_id': task_id, 'br': task_class.br, 'lm': task_class.lm, 'tr': task_class.tr}
+    code = database_funs.get_code(task_id, 'task')
+    task_object = Tasks(date_create=timestamp, user_id=user_id, code=code, kind='custom', data=data)
+    task_object.save()
+    # Регистрация таска
+    outc = {'code': code, 'class_id': task_id}
+    transact_id = reg_funs.get_transact_id(task_id, code, 'z')
+    reg_funs.simple_reg(user_id, 17, timestamp, transact_id, json=outc)
+    # регистрация записи таска
+    outc = model_to_dict(task_object)
+    outc['date_create'] = datetime.strftime(outc['date_create'], '%Y-%m-%dT%H:%M:%S')
+    reg_funs.simple_reg(user_id, 18, timestamp, transact_id, json=outc)
+    return 'ok'
 
 
 
