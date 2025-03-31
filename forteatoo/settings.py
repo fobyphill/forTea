@@ -80,21 +80,27 @@ WSGI_APPLICATION = 'forteatoo.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/4.0/ref/settings/#databases
+# Пустая БД (По умолчанию)
+#DATABASES = {
+#    'default': {
+#        'ENGINE': 'django.db.backends.sqlite3',
+#        'NAME': BASE_DIR / 'db_empty.sqlite3',
+#    },
+#    'arhiv': {
+#        'ENGINE': 'django.db.backends.sqlite3',
+#        'NAME': BASE_DIR / 'arhiv_empty.sqlite3',
+#    }
+#}
 
-with open('login.txt') as f:
-    file = [line for line in f]
-    host = file[0].strip()
-    port = file[1].strip()
-    name = file[2].strip()
-    login = file[3].strip()
-    password = file[4].strip()
-
-
-
+#Система с конфигурацией учета секции фитнеса "Тренер"
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db_coach.sqlite3',
+    },
+    'arhiv': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'arhiv_coach.sqlite3',
     }
 }
 

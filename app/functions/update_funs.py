@@ -17,6 +17,7 @@ from app.other.global_vars import root_folder
 
 def run_delays(props=None):
     datetime_now = datetime.datetime.today()
+    upd_to_log('азаза',  datetime_now)
     if not props:
         props = Tasks.objects.filter(kind='prop', date_done__isnull=False, date_delay__lte=datetime_now)\
             .order_by('date_delay', 'id')
